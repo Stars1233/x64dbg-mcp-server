@@ -356,14 +356,14 @@ fn handleClient(sock: SOCKET) void {
         return;
     }
 
-    if (auth_token_len > 0) {
+    {
         const headers_slice = if (findHeaderEnd(request)) |he| request[0..he] else request;
-        const token = parseHeaderValue(headers_slice, "Authorization");
+        const tok = parseHeaderValue(headers_slice, "Authorization");
         var authorized = false;
-        if (token) |t| {
+        if (tok) |t| {
             if (t.len > 7 and std.mem.eql(u8, t[0..7], "Bearer ")) {
                 const bearer = t[7..];
-                if (bearer.len == auth_token_len and std.mem.eql(u8, bearer, auth_token[0..auth_token_len])) {
+                if (auth_token_len > 0 and bearer.len == auth_token_len and std.mem.eql(u8, bearer, auth_token[0..auth_token_len])) {
                     authorized = true;
                 }
             }

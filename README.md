@@ -40,7 +40,7 @@ Built with [Zig](https://ziglang.org/) — zero dependencies, single-binary outp
 - **Zero Dependencies:** Pure native plugin, no runtime or framework needed.
 - **x32 and x64:** Single codebase, builds both architectures from one command.
 - **Dual Transport:** Streamable HTTP + SSE — compatible with any MCP client (new and legacy).
-- **Bearer Auth:** Optional token authentication — generate a token from the config dialog, required when binding to `0.0.0.0` to prevent unauthorized access.
+- **Bearer Auth:** Mandatory token authentication — auto-generated on first run, required on every request to prevent unauthorized access.
 - **Config Dialog:** Change IP/port/token from the Plugins menu, auto-restarts the server on save.
 - **Auto-Start:** MCP server starts automatically when x64dbg launches.
 - **Cross-Compile:** Build Windows plugins from Linux, macOS, or WSL.
@@ -74,7 +74,7 @@ Add to your MCP client config (`.mcp.json`, etc.):
 }
 ```
 
-**With authentication (recommended when binding to 0.0.0.0):**
+**With authentication (required):**
 ```json
 {
   "mcpServers": {
@@ -216,7 +216,7 @@ Go to **Plugins > x64dbg-MCP Server > Configure MCP Server...** to change the bi
 
 ### Authentication
 
-When binding to `0.0.0.0`, anyone on the network can reach the MCP server — which has full debugger control and can read/write process memory. Click **Generate** in the config dialog to create a random Bearer token. Clients must include it as an `Authorization: Bearer <token>` header on every request or they receive `401 Unauthorized`. Leave the token empty to disable auth (safe for `127.0.0.1`).
+A Bearer token is auto-generated on first run and required on every request. The MCP server has full debugger control and can read/write process memory — all requests without a valid token receive `401 Unauthorized`. Click **Generate** in the config dialog to rotate the token, or **Copy** to copy it to clipboard. Clients must include the token as an `Authorization: Bearer <token>` header.
 
 Changes take effect immediately — the server auto-restarts on save. Config is persisted to `mcp_config.json` next to the x64dbg executable.
 
