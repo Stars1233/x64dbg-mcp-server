@@ -557,6 +557,22 @@ fn buildInitializeResult(w: *JsonWriter) void {
     w.key("tools");
     w.raw("{\"listChanged\":true},");
     w.endObject();
+    w.raw(",");
+    w.fieldStr("instructions",
+        \\You are controlling x64dbg, a Windows debugger, via MCP tools.
+        \\
+        \\CRITICAL RULES:
+        \\1. ALWAYS call GetDebugState first to understand the current state before doing anything.
+        \\2. After every stepping operation (StepInto, StepOver, StepOut), the response includes the new address and disassembly. Read it carefully before deciding your next action.
+        \\3. The target must be PAUSED to read memory, disassemble, or inspect state. If it is RUNNING, call PauseDebug or WaitForPause first.
+        \\4. After calling run, the target is usually RUNNING. Use WaitForPause to wait for a breakpoint hit before inspecting state.
+        \\5. Use EvalExpression to resolve symbols and addresses (e.g. kernel32:CreateFileA, cip, eax+4).
+        \\6. When analyzing a binary: LoadBinary, then WaitForPause, then GetDebugState, then proceed with analysis.
+        \\7. Breakpoint workflow: SetBreakpoint, run, WaitForPause, then inspect state.
+        \\8. For function analysis: use DisassembleFunction (needs analysis, run ExecuteDebuggerCommand with analr <address> first).
+        \\9. SearchSymbols searches exports across all loaded modules. Use it to find API functions.
+        \\10. Keep track of what binary is loaded and where you are in the code. Reference addresses and module names in your explanations.
+    );
     w.endObject();
 }
 

@@ -1056,8 +1056,11 @@ fn waitForPause(params: ?std.json.Value, out: []u8) ToolResult {
     if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
 
     if (!bridge.isRunning()) {
-        const cip = bridge.valFromString("cip");
-        return fmtResult(out, "ALREADY_PAUSED at 0x{X}. Target is not running.", .{cip});
+        var pos: usize = 0;
+        const hdr = std.fmt.bufPrint(out[pos..], "ALREADY_PAUSED.", .{}) catch return errResult(out, "Error");
+        pos += hdr.len;
+        appendStepContext(out, &pos);
+        return .{ .text = out[0..pos] };
     }
 
     var timeout_ms: i64 = 30000;
@@ -1071,12 +1074,12 @@ fn waitForPause(params: ?std.json.Value, out: []u8) ToolResult {
             return result(out, "TARGET_EXITED. The debug session has ended.");
 
         if (!bridge.isRunning()) {
-            const cip = bridge.valFromString("cip");
             const elapsed = @as(i64, @intCast(GetTickCount64())) - start;
-            var mod_buf: [bridge.MAX_MODULE_SIZE]u8 = undefined;
-            const has_mod = bridge.getModuleAt(cip, &mod_buf);
-            const mod_name = if (has_mod) bridge.cstrSlice(&mod_buf) else "unknown";
-            return fmtResult(out, "PAUSED at 0x{X} in {s} after {d}ms.", .{ cip, mod_name, elapsed });
+            var pos: usize = 0;
+            const hdr = std.fmt.bufPrint(out[pos..], "PAUSED after {d}ms.", .{elapsed}) catch return errResult(out, "Error");
+            pos += hdr.len;
+            appendStepContext(out, &pos);
+            return .{ .text = out[0..pos] };
         }
         Sleep(50);
     }
@@ -1089,34 +1092,104 @@ fn runTarget(_: ?std.json.Value, out: []u8) ToolResult {
     _ = bridge.cmdExec("run");
     Sleep(250);
 
+    var pos: usize = 0;
     if (bridge.isRunning()) {
-        return result(out, "STATUS: RUNNING. The target process is now in a running state.");
+        const hdr = std.fmt.bufPrint(out[pos..], "Status: RUNNING. Use WaitForPause to wait for a breakpoint hit.", .{}) catch return errResult(out, "Error");
+        pos += hdr.len;
+    } else {
+        const hdr = std.fmt.bufPrint(out[pos..], "Status: PAUSED (hit breakpoint or system event).", .{}) catch return errResult(out, "Error");
+        pos += hdr.len;
+        appendStepContext(out, &pos);
     }
-    return result(out, "STATUS: PAUSED. Process resumed but hit an immediate breakpoint or system event.");
+    return .{ .text = out[0..pos] };
+}
+
+// ── Step context helper ─────────────────────────────────────────────
+fn appendStepContext(out: []u8, pos: *usize) void {
+    if (bridge.isRunning()) {
+        const line = std.fmt.bufPrint(out[pos.*..], "\nStatus: RUNNING", .{}) catch return;
+        pos.* += line.len;
+        return;
+    }
+    const cip = bridge.valFromString("cip");
+    var mod_buf: [bridge.MAX_MODULE_SIZE]u8 = undefined;
+    const has_mod = bridge.getModuleAt(cip, &mod_buf);
+    const mod_name = if (has_mod) bridge.cstrSlice(&mod_buf) else "unknown";
+
+    var label_buf: [bridge.MAX_LABEL_SIZE]u8 = undefined;
+    const has_label = bridge.getLabelAt(cip, &label_buf);
+    const label = if (has_label) bridge.cstrSlice(&label_buf) else "";
+
+    const addr_line = std.fmt.bufPrint(out[pos.*..], "\nAddress: 0x{X} ({s})", .{ cip, mod_name }) catch return;
+    pos.* += addr_line.len;
+
+    if (label.len > 0) {
+        const lbl_line = std.fmt.bufPrint(out[pos.*..], "\nLabel: {s}", .{label}) catch return;
+        pos.* += lbl_line.len;
+    }
+
+    const gui_fn = bridge.GuiGetDisassembly orelse return;
+    var text_buf: [256]u8 = std.mem.zeroes([256]u8);
+    if (gui_fn(cip, &text_buf) != 0) {
+        const instr = bridge.cstrSlice(&text_buf);
+        if (instr.len > 0) {
+            const dis_line = std.fmt.bufPrint(out[pos.*..], "\nInstruction: {s}", .{instr}) catch return;
+            pos.* += dis_line.len;
+        }
+    }
+
+    var next_buf: [64]u8 = undefined;
+    const next_expr = std.fmt.bufPrint(&next_buf, "dis.next(0x{X})\x00", .{cip}) catch return;
+    const next_addr = bridge.valFromString(@ptrCast(next_expr.ptr));
+    if (next_addr != 0 and next_addr != cip) {
+        var text_buf2: [256]u8 = std.mem.zeroes([256]u8);
+        if (gui_fn(next_addr, &text_buf2) != 0) {
+            const next_instr = bridge.cstrSlice(&text_buf2);
+            if (next_instr.len > 0) {
+                const next_line = std.fmt.bufPrint(out[pos.*..], "\nNext: 0x{X}  {s}", .{ next_addr, next_instr }) catch return;
+                pos.* += next_line.len;
+            }
+        }
+    }
 }
 
 // ── StepInto (F7) ───────────────────────────────────────────────────
 fn stepInto(_: ?std.json.Value, out: []u8) ToolResult {
     if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
     _ = bridge.cmdExec("sti");
     Sleep(100);
-    return result(out, "Success: Stepped into instruction.");
+    var pos: usize = 0;
+    const hdr = std.fmt.bufPrint(out[pos..], "Stepped into.", .{}) catch return errResult(out, "Error");
+    pos += hdr.len;
+    appendStepContext(out, &pos);
+    return .{ .text = out[0..pos] };
 }
 
 // ── StepOver (F8) ───────────────────────────────────────────────────
 fn stepOver(_: ?std.json.Value, out: []u8) ToolResult {
     if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
     _ = bridge.cmdExec("sto");
     Sleep(100);
-    return result(out, "Success: Stepped over instruction.");
+    var pos: usize = 0;
+    const hdr = std.fmt.bufPrint(out[pos..], "Stepped over.", .{}) catch return errResult(out, "Error");
+    pos += hdr.len;
+    appendStepContext(out, &pos);
+    return .{ .text = out[0..pos] };
 }
 
 // ── StepOut (Ctrl+F9) ───────────────────────────────────────────────
 fn stepOut(_: ?std.json.Value, out: []u8) ToolResult {
     if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
     _ = bridge.cmdExec("rtr");
     Sleep(150);
-    return result(out, "Success: Executing until return.");
+    var pos: usize = 0;
+    const hdr = std.fmt.bufPrint(out[pos..], "Stepped out.", .{}) catch return errResult(out, "Error");
+    pos += hdr.len;
+    appendStepContext(out, &pos);
+    return .{ .text = out[0..pos] };
 }
 
 // ── PauseDebug ──────────────────────────────────────────────────────
