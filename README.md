@@ -1,10 +1,10 @@
 # x64dbg-MCP Server
 
 ![Stars](https://img.shields.io/github/stars/duty1g/x64dbg-mcp-server)
-![Version](https://img.shields.io/github/v/release/duty1g/x64dbg-mcp-server)
-![Downloads](https://img.shields.io/github/downloads/duty1g/x64dbg-mcp-server/total)
+[![Version](https://img.shields.io/github/v/release/duty1g/x64dbg-mcp-server)](https://github.com/duty1g/x64dbg-mcp-server/releases)
+[![Downloads](https://img.shields.io/github/downloads/duty1g/x64dbg-mcp-server/total)](https://github.com/duty1g/x64dbg-mcp-server/releases)
 ![alt text](https://img.shields.io/github/languages/top/duty1g/x64dbg-mcp-server)
-![License](https://img.shields.io/badge/License-MIT-green)
+[![License](https://img.shields.io/badge/License-MIT-green)](./LICENSE)
 [![Red Team](https://img.shields.io/badge/Red-Team-red)](https://duty1g.online)
 [![Reverse Engineering](https://img.shields.io/badge/Reverse%20Engineering-purple)](https://duty1g.online)
 <a href="https://twitter.com/duty_1g"><img src="https://img.shields.io/twitter/follow/duty_1g.svg?logo=twitter"></a>
