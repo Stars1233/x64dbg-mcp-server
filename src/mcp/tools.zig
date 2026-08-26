@@ -440,6 +440,166 @@ pub const tools = [_]ToolDef{
         .handler = dumpMemory,
         .schema_fn = schemaDumpMemory,
     },
+    .{
+        .name = "AllocateMemory",
+        .description = "Allocates a block of memory in the target process.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = allocateMemory,
+        .schema_fn = schemaAllocateMemory,
+    },
+    .{
+        .name = "FreeMemory",
+        .description = "Frees a previously allocated memory block in the target process.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = freeMemory,
+        .schema_fn = schemaFreeMemory,
+    },
+    .{
+        .name = "EnableBreakpoint",
+        .description = "Enables a breakpoint at a given address.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = enableBreakpoint,
+        .schema_fn = schemaTargetAddr,
+    },
+    .{
+        .name = "DisableBreakpoint",
+        .description = "Disables a breakpoint at a given address without deleting it.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = disableBreakpoint,
+        .schema_fn = schemaTargetAddr,
+    },
+    .{
+        .name = "ToggleBreakpoint",
+        .description = "Toggles a breakpoint between enabled and disabled.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = toggleBreakpoint,
+        .schema_fn = schemaTargetAddr,
+    },
+    .{
+        .name = "DeleteAllBreakpoints",
+        .description = "Removes all breakpoints (normal, hardware, and memory).",
+        .debug_only = true,
+        .read_only = false,
+        .handler = deleteAllBreakpoints,
+        .schema_fn = schemaNoParams,
+    },
+    .{
+        .name = "ResetHitCount",
+        .description = "Resets the hit counter of a breakpoint at the given address to zero.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = resetHitCount,
+        .schema_fn = schemaTargetAddr,
+    },
+    .{
+        .name = "DisassembleFunction",
+        .description = "Disassembles an entire function by finding its start/end boundaries from the analysis database.",
+        .debug_only = true,
+        .read_only = true,
+        .handler = disassembleFunction,
+        .schema_fn = schemaTargetAddr,
+    },
+    .{
+        .name = "SearchSymbols",
+        .description = "Searches for symbols (labels) matching a pattern in a module.",
+        .debug_only = true,
+        .read_only = true,
+        .handler = searchSymbols,
+        .schema_fn = schemaSearchSymbols,
+    },
+    .{
+        .name = "ListSymbols",
+        .description = "Lists exported symbols of a module.",
+        .debug_only = true,
+        .read_only = true,
+        .handler = listSymbols,
+        .schema_fn = schemaListSymbols,
+    },
+    .{
+        .name = "SuspendThread",
+        .description = "Suspends a thread by its thread ID.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = suspendThread,
+        .schema_fn = schemaThreadOp,
+    },
+    .{
+        .name = "ResumeThread",
+        .description = "Resumes a suspended thread by its thread ID.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = resumeThread,
+        .schema_fn = schemaThreadOp,
+    },
+    .{
+        .name = "SetBookmark",
+        .description = "Sets a bookmark at the specified address.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = setBookmark,
+        .schema_fn = schemaTargetAddr,
+    },
+    .{
+        .name = "DeleteBookmark",
+        .description = "Deletes a bookmark at the specified address.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = deleteBookmark,
+        .schema_fn = schemaTargetAddr,
+    },
+    .{
+        .name = "ListBookmarks",
+        .description = "Lists all bookmarks with addresses and labels.",
+        .debug_only = true,
+        .read_only = true,
+        .handler = listBookmarks,
+        .schema_fn = schemaNoParams,
+    },
+    .{
+        .name = "DumpModule",
+        .description = "Dumps an entire loaded module to a file on disk.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = dumpModule,
+        .schema_fn = schemaDumpModule,
+    },
+    .{
+        .name = "AnalyzeModule",
+        .description = "Shows PE structure analysis: sections, entry point, image size, characteristics.",
+        .debug_only = true,
+        .read_only = true,
+        .handler = analyzeModule,
+        .schema_fn = schemaModuleName,
+    },
+    .{
+        .name = "DetectOEP",
+        .description = "Attempts to detect the Original Entry Point for packed executables by analyzing section characteristics.",
+        .debug_only = true,
+        .read_only = true,
+        .handler = detectOEP,
+        .schema_fn = schemaModuleName,
+    },
+    .{
+        .name = "GetDumpableRegions",
+        .description = "Lists memory regions that can be dumped (committed, readable) for a module or the entire process.",
+        .debug_only = true,
+        .read_only = true,
+        .handler = getDumpableRegions,
+        .schema_fn = schemaNoParams,
+    },
+    .{
+        .name = "RestorePatches",
+        .description = "Restores all patched bytes back to their original values.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = restorePatches,
+        .schema_fn = schemaNoParams,
+    },
 };
 
 // ── Schema helpers ──────────────────────────────────────────────────
@@ -566,6 +726,34 @@ fn schemaGetArguments(w: *JsonWriter) void {
 
 fn schemaDumpMemory(w: *JsonWriter) void {
     w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Start address.\"},\"size\":{\"type\":\"integer\",\"description\":\"Bytes to dump.\"},\"filePath\":{\"type\":\"string\",\"description\":\"Output file path on disk.\"}},\"required\":[\"address\",\"size\",\"filePath\"]}");
+}
+
+fn schemaTargetAddr(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Target address or expression.\"}},\"required\":[\"address\"]}");
+}
+
+fn schemaAllocateMemory(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"size\":{\"type\":\"integer\",\"description\":\"Number of bytes to allocate.\"},\"protection\":{\"type\":\"string\",\"description\":\"Memory protection: rwx, rw, rx, r (default rw).\",\"default\":\"rw\"}},\"required\":[\"size\"]}");
+}
+
+fn schemaFreeMemory(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Base address of the allocated block to free.\"}},\"required\":[\"address\"]}");
+}
+
+fn schemaSearchSymbols(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":\"string\",\"description\":\"Symbol name pattern to search for (substring match).\"},\"module\":{\"type\":\"string\",\"description\":\"Module to search in (default: all modules).\"}},\"required\":[\"pattern\"]}");
+}
+
+fn schemaListSymbols(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"module\":{\"type\":\"string\",\"description\":\"Module name to list symbols from.\"}},\"required\":[\"module\"]}");
+}
+
+fn schemaThreadOp(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"threadId\":{\"type\":\"integer\",\"description\":\"Thread ID to operate on.\"}},\"required\":[\"threadId\"]}");
+}
+
+fn schemaDumpModule(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"module\":{\"type\":\"string\",\"description\":\"Module name to dump.\"},\"filePath\":{\"type\":\"string\",\"description\":\"Output file path.\"}},\"required\":[\"module\",\"filePath\"]}");
 }
 
 // ── Tool implementations ────────────────────────────────────────────
@@ -2337,4 +2525,612 @@ fn dumpMemory(params: ?std.json.Value, out: []u8) ToolResult {
         return errResult(out, "Error: input too long.");
     const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
     return fmtResult(out, "{s}", .{if (ok) "Memory dumped to file." else "Failed to dump memory."});
+}
+
+// ── AllocateMemory ────────────────────────────────────────────────
+fn allocateMemory(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const size = getParamInt(params, "size") orelse
+        return errResult(out, "Error: size is required.");
+    if (size <= 0 or size > 0x10000000) return errResult(out, "Error: Invalid size (1 to 256MB).");
+    const prot_str = getParamStr(params, "protection") orelse "rw";
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "alloc {d}\x00", .{size}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExecDirect(@ptrCast(cmd.ptr));
+    if (!ok) return errResult(out, "Error: alloc command failed.");
+    const result_val = bridge.valFromString("$result\x00");
+    if (result_val == 0) return errResult(out, "Error: Allocation returned null.");
+    return fmtResult(out, "Allocated {d} bytes at 0x{X} (protection: {s})", .{ size, result_val, prot_str });
+}
+
+// ── FreeMemory ────────────────────────────────────────────────────
+fn freeMemory(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr_str = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "free {s}\x00", .{addr_str}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExecDirect(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Memory freed." else "Error: Failed to free memory."});
+}
+
+// ── EnableBreakpoint ──────────────────────────────────────────────
+fn enableBreakpoint(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "bpe {s}\x00", .{addr}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Breakpoint enabled." else "Error: Failed to enable breakpoint."});
+}
+
+// ── DisableBreakpoint ─────────────────────────────────────────────
+fn disableBreakpoint(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "bpd {s}\x00", .{addr}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Breakpoint disabled." else "Error: Failed to disable breakpoint."});
+}
+
+// ── ToggleBreakpoint ──────────────────────────────────────────────
+fn toggleBreakpoint(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "bp {s}, toggle\x00", .{addr}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Breakpoint toggled." else "Error: Failed to toggle breakpoint."});
+}
+
+// ── DeleteAllBreakpoints ──────────────────────────────────────────
+fn deleteAllBreakpoints(_: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    _ = bridge.cmdExec("bpc\x00");
+    _ = bridge.cmdExec("bphc *\x00");
+    _ = bridge.cmdExec("bpmc *\x00");
+    return result(out, "All breakpoints deleted (normal, hardware, memory).");
+}
+
+// ── ResetHitCount ─────────────────────────────────────────────────
+fn resetHitCount(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "ResetBreakpointHitCount {s}\x00", .{addr}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Hit count reset." else "Error: Failed to reset hit count."});
+}
+
+// ── DisassembleFunction ───────────────────────────────────────────
+fn disassembleFunction(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
+    const addr_str = getParamStr(params, "address") orelse "cip";
+
+    var start_buf: [64]u8 = undefined;
+    const start_expr = std.fmt.bufPrint(&start_buf, "func.start({s})\x00", .{addr_str}) catch
+        return errResult(out, "Error: expression too long.");
+    const func_start = bridge.valFromString(@ptrCast(start_expr.ptr));
+
+    var end_buf: [64]u8 = undefined;
+    const end_expr = std.fmt.bufPrint(&end_buf, "func.end({s})\x00", .{addr_str}) catch
+        return errResult(out, "Error: expression too long.");
+    const func_end = bridge.valFromString(@ptrCast(end_expr.ptr));
+
+    if (func_start == 0 or func_end == 0 or func_end <= func_start)
+        return errResult(out, "Error: No function boundaries found. Run analysis first (analr command).");
+
+    var pos: usize = 0;
+    var label_buf: [bridge.MAX_LABEL_SIZE]u8 = undefined;
+    if (bridge.getLabelAt(func_start, &label_buf)) {
+        const lbl = bridge.cstrSlice(&label_buf);
+        const hdr = std.fmt.bufPrint(out[pos..], "Function: {s} (0x{X} - 0x{X})\n\n", .{ lbl, func_start, func_end }) catch "";
+        pos += hdr.len;
+    } else {
+        const hdr = std.fmt.bufPrint(out[pos..], "Function: 0x{X} - 0x{X}\n\n", .{ func_start, func_end }) catch "";
+        pos += hdr.len;
+    }
+
+    const gui_fn = bridge.GuiGetDisassembly;
+    var current = func_start;
+    var count: usize = 0;
+    while (current <= func_end and count < 500) : (count += 1) {
+        var next_buf: [64]u8 = undefined;
+        const next_expr = std.fmt.bufPrint(&next_buf, "dis.next(0x{X})\x00", .{current}) catch break;
+        const next_addr = bridge.valFromString(@ptrCast(next_expr.ptr));
+        if (next_addr == 0 or next_addr == current) break;
+
+        var text_buf: [256]u8 = std.mem.zeroes([256]u8);
+        var instr_text: []const u8 = "";
+        if (gui_fn) |f| {
+            if (f(current, &text_buf) != 0) {
+                instr_text = bridge.cstrSlice(&text_buf);
+            }
+        }
+
+        if (instr_text.len > 0) {
+            const line = std.fmt.bufPrint(out[pos..], "0x{X}  {s}\n", .{ current, instr_text }) catch break;
+            pos += line.len;
+        } else {
+            const line = std.fmt.bufPrint(out[pos..], "0x{X}\n", .{current}) catch break;
+            pos += line.len;
+        }
+        current = next_addr;
+    }
+
+    if (pos == 0) return errResult(out, "Error: Could not disassemble function.");
+    return .{ .text = out[0..pos] };
+}
+
+// ── SearchSymbols ─────────────────────────────────────────────────
+fn searchSymbols(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
+    const pattern = getParamStr(params, "pattern") orelse
+        return errResult(out, "Error: pattern is required.");
+    const module_filter = getParamStr(params, "module");
+
+    const f = bridge.DbgMemMap orelse return errResult(out, "Error: Memory map not available.");
+    var memmap: bridge.MEMMAP = undefined;
+    if (f(&memmap) == 0) return errResult(out, "Error: Failed to get memory map.");
+    defer {
+        if (memmap.count > 0) {
+            if (bridge.BridgeFree) |free| free(@ptrCast(memmap.page));
+        }
+    }
+
+    var pos: usize = 0;
+    const hdr = std.fmt.bufPrint(out[pos..], "Symbols matching \"{s}\":\n\n", .{pattern}) catch "";
+    pos += hdr.len;
+
+    var count: usize = 0;
+    var last_base: bridge.duint = 0;
+    const page_count: usize = @intCast(memmap.count);
+    var pi: usize = 0;
+    while (pi < page_count and count < 200) : (pi += 1) {
+        const page = &memmap.page[pi];
+        const mod_path = bridge.cstrSlice(&page.info);
+        if (mod_path.len == 0) continue;
+        if (!isModulePath(mod_path)) continue;
+        if (page.mbi_AllocationBase == last_base) continue;
+        last_base = page.mbi_AllocationBase;
+
+        const base = page.mbi_AllocationBase;
+        var mod_buf: [bridge.MAX_MODULE_SIZE]u8 = undefined;
+        if (!bridge.getModuleAt(base, &mod_buf)) continue;
+        const mod_name = bridge.cstrSlice(&mod_buf);
+
+        if (module_filter) |mf| {
+            if (!asciiContains(mod_name, mf)) continue;
+        }
+
+        const exp_dir = peGetDataDir(base, 0) orelse continue;
+        if (exp_dir.rva == 0) continue;
+        var ed: [40]u8 = undefined;
+        if (!bridge.memRead(base + exp_dir.rva, &ed)) continue;
+        const num_names = readU32LE(ed[24..28]);
+        const addr_funcs = readU32LE(ed[28..32]);
+        const addr_names = readU32LE(ed[32..36]);
+        const addr_ords = readU32LE(ed[36..40]);
+
+        const limit = @min(num_names, 1000);
+        var ei: u32 = 0;
+        while (ei < limit and count < 200) : (ei += 1) {
+            var nrb: [4]u8 = undefined;
+            if (!bridge.memRead(base + addr_names + ei * 4, &nrb)) break;
+            var nbuf: [128]u8 = undefined;
+            if (!bridge.memRead(base + readU32LE(&nrb), &nbuf)) break;
+            const name = bridge.cstrSlice(&nbuf);
+            if (asciiContains(name, pattern)) {
+                var ob: [2]u8 = undefined;
+                if (!bridge.memRead(base + addr_ords + ei * 2, &ob)) break;
+                const ordinal = readU16LE(&ob);
+                var frb: [4]u8 = undefined;
+                if (!bridge.memRead(base + addr_funcs + @as(u32, ordinal) * 4, &frb)) break;
+                const func_rva = readU32LE(&frb);
+                const line = std.fmt.bufPrint(out[pos..], "0x{X}  {s}!{s}\n", .{ base + func_rva, mod_name, name }) catch break;
+                pos += line.len;
+                count += 1;
+            }
+        }
+    }
+
+    if (count == 0) return fmtResult(out, "No symbols found matching \"{s}\".", .{pattern});
+    return .{ .text = out[0..pos] };
+}
+
+fn asciiContains(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len > haystack.len) return false;
+    if (needle.len == 0) return true;
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        var match = true;
+        for (needle, 0..) |nc, j| {
+            const hc = haystack[i + j];
+            const nl = if (nc >= 'A' and nc <= 'Z') nc + 32 else nc;
+            const hl = if (hc >= 'A' and hc <= 'Z') hc + 32 else hc;
+            if (nl != hl) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+// ── ListSymbols ───────────────────────────────────────────────────
+fn listSymbols(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
+    const mod_name_param = getParamStr(params, "module") orelse
+        return errResult(out, "Error: module is required.");
+
+    const base = resolveModBase(mod_name_param);
+    if (base == 0) return fmtErr(out, "Error: Module \"{s}\" not found.", .{mod_name_param});
+
+    const exp_dir = peGetDataDir(base, 0) orelse
+        return errResult(out, "Error: Could not read PE headers.");
+    if (exp_dir.rva == 0) return result(out, "No exports.");
+
+    var ed: [40]u8 = undefined;
+    if (!bridge.memRead(base + exp_dir.rva, &ed))
+        return errResult(out, "Error: Could not read export directory.");
+
+    const num_names = readU32LE(ed[24..28]);
+    const addr_funcs = readU32LE(ed[28..32]);
+    const addr_names = readU32LE(ed[32..36]);
+    const addr_ords = readU32LE(ed[36..40]);
+    const ord_base = readU32LE(ed[16..20]);
+
+    var pos: usize = 0;
+    const hdr = std.fmt.bufPrint(out[pos..], "Exports from {s} ({d} symbols):\n\n", .{ mod_name_param, num_names }) catch "";
+    pos += hdr.len;
+
+    const limit = @min(num_names, 500);
+    var i: u32 = 0;
+    while (i < limit) : (i += 1) {
+        var nrb: [4]u8 = undefined;
+        if (!bridge.memRead(base + addr_names + i * 4, &nrb)) break;
+        var ob: [2]u8 = undefined;
+        if (!bridge.memRead(base + addr_ords + i * 2, &ob)) break;
+        const ordinal = readU16LE(&ob);
+        var frb: [4]u8 = undefined;
+        if (!bridge.memRead(base + addr_funcs + @as(u32, ordinal) * 4, &frb)) break;
+        const func_rva = readU32LE(&frb);
+        var nbuf: [128]u8 = undefined;
+        if (!bridge.memRead(base + readU32LE(&nrb), &nbuf)) break;
+        const name = bridge.cstrSlice(&nbuf);
+        const line = std.fmt.bufPrint(out[pos..], "  #{d} 0x{X} {s}\n", .{ @as(u32, ordinal) + ord_base, base + func_rva, name }) catch break;
+        pos += line.len;
+    }
+    if (pos == 0) return result(out, "No exports found.");
+    return .{ .text = out[0..pos] };
+}
+
+// ── SuspendThread ─────────────────────────────────────────────────
+fn suspendThread(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const tid = getParamInt(params, "threadId") orelse
+        return errResult(out, "Error: threadId is required.");
+    var cmd_buf: [64]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "suspendthread {d}\x00", .{tid}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Thread suspended." else "Error: Failed to suspend thread."});
+}
+
+// ── ResumeThread ──────────────────────────────────────────────────
+fn resumeThread(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const tid = getParamInt(params, "threadId") orelse
+        return errResult(out, "Error: threadId is required.");
+    var cmd_buf: [64]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "resumethread {d}\x00", .{tid}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Thread resumed." else "Error: Failed to resume thread."});
+}
+
+// ── SetBookmark ───────────────────────────────────────────────────
+fn setBookmark(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "bookmarkadd {s}\x00", .{addr}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Bookmark set." else "Error: Failed to set bookmark."});
+}
+
+// ── DeleteBookmark ────────────────────────────────────────────────
+fn deleteBookmark(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    var cmd_buf: [128]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "bookmarkdel {s}\x00", .{addr}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Bookmark deleted." else "Error: Failed to delete bookmark."});
+}
+
+// ── ListBookmarks ─────────────────────────────────────────────────
+fn listBookmarks(_: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const ok = bridge.cmdExecDirect("bookmarklist\x00");
+    if (!ok) return errResult(out, "Error: Failed to list bookmarks.");
+    return result(out, "Bookmarks listed in the x64dbg log. Use GetEventLog to see results.");
+}
+
+// ── DumpModule ────────────────────────────────────────────────────
+fn dumpModule(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
+    const mod_name = getParamStr(params, "module") orelse
+        return errResult(out, "Error: module is required.");
+    const file_path = getParamStr(params, "filePath") orelse
+        return errResult(out, "Error: filePath is required.");
+
+    var cmd_buf: [512]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "modexport {s}, \"{s}\"\x00", .{ mod_name, file_path }) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExecDirect(@ptrCast(cmd.ptr));
+    if (!ok) {
+        var base_buf: [128]u8 = undefined;
+        const base_expr = std.fmt.bufPrint(&base_buf, "{s}:0\x00", .{mod_name}) catch return errResult(out, "Error: expression too long.");
+        const mod_base = bridge.valFromString(@ptrCast(base_expr.ptr));
+        if (mod_base == 0) return fmtErr(out, "Error: Module \"{s}\" not found.", .{mod_name});
+        const mod_size_expr = std.fmt.bufPrint(&cmd_buf, "mod.size({s}:0)\x00", .{mod_name}) catch return errResult(out, "Error: expression too long.");
+        const mod_size = bridge.valFromString(@ptrCast(mod_size_expr.ptr));
+        if (mod_size == 0) return fmtErr(out, "Error: Could not determine size of \"{s}\".", .{mod_name});
+        var save_buf: [512]u8 = undefined;
+        const save_cmd = std.fmt.bufPrint(&save_buf, "savedata \"{s}\", 0x{X}, 0x{X}\x00", .{ file_path, mod_base, mod_size }) catch
+            return errResult(out, "Error: path too long.");
+        const save_ok = bridge.cmdExec(@ptrCast(save_cmd.ptr));
+        return fmtResult(out, "{s}", .{if (save_ok) "Module dumped to file." else "Error: Failed to dump module."});
+    }
+    return fmtResult(out, "Module \"{s}\" dumped to \"{s}\".", .{ mod_name, file_path });
+}
+
+// ── AnalyzeModule ─────────────────────────────────────────────────
+fn analyzeModule(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
+    const mod_name = getParamStr(params, "module") orelse
+        return errResult(out, "Error: module is required.");
+
+    var expr_buf: [128]u8 = undefined;
+    const base_expr = std.fmt.bufPrint(&expr_buf, "{s}:0\x00", .{mod_name}) catch
+        return errResult(out, "Error: expression too long.");
+    const base = bridge.valFromString(@ptrCast(base_expr.ptr));
+    if (base == 0) return fmtErr(out, "Error: Module \"{s}\" not found.", .{mod_name});
+
+    var pe_hdr: [4]u8 = undefined;
+    if (!bridge.memRead(base + 0x3C, &pe_hdr)) return errResult(out, "Error: Cannot read PE header.");
+    const pe_off: usize = readU32LE(&pe_hdr);
+
+    var sig: [4]u8 = undefined;
+    if (!bridge.memRead(base + pe_off, &sig)) return errResult(out, "Error: Cannot read PE signature.");
+    if (!std.mem.eql(u8, &sig, "PE\x00\x00")) return errResult(out, "Error: Invalid PE signature.");
+
+    var coff: [20]u8 = undefined;
+    if (!bridge.memRead(base + pe_off + 4, &coff)) return errResult(out, "Error: Cannot read COFF header.");
+    const num_sections = readU16LE(coff[2..4]);
+    const optional_size = readU16LE(coff[16..18]);
+    const characteristics = readU16LE(coff[18..20]);
+
+    var opt: [4]u8 = undefined;
+    if (!bridge.memRead(base + pe_off + 24, &opt)) return errResult(out, "Error: Cannot read optional header.");
+    const magic = readU16LE(opt[0..2]);
+    const is_pe32_plus = (magic == 0x20b);
+
+    const ep_off: usize = 16;
+    var ep_buf: [4]u8 = undefined;
+    if (!bridge.memRead(base + pe_off + 24 + ep_off, &ep_buf)) return errResult(out, "Error: Cannot read EP.");
+    const ep_rva = readU32LE(&ep_buf);
+
+    const size_off: usize = if (is_pe32_plus) 56 else 56;
+    var size_buf: [4]u8 = undefined;
+    if (!bridge.memRead(base + pe_off + 24 + size_off, &size_buf))
+        return errResult(out, "Error: Cannot read image size.");
+    const image_size = readU32LE(&size_buf);
+
+    var pos: usize = 0;
+    const hdr_info = std.fmt.bufPrint(out[pos..], "Module: {s}\nBase: 0x{X}\nFormat: {s}\nEntry Point: 0x{X} (RVA 0x{X})\nImage Size: 0x{X} ({d} KB)\nCharacteristics: 0x{X}\nSections: {d}\n\n", .{
+        mod_name, base, if (is_pe32_plus) "PE32+" else "PE32", base + ep_rva, ep_rva, image_size, image_size / 1024, characteristics, num_sections,
+    }) catch return errResult(out, "Error: Output too long.");
+    pos += hdr_info.len;
+
+    const section_base = pe_off + 24 + optional_size;
+    var si: usize = 0;
+    while (si < num_sections and si < 64) : (si += 1) {
+        var sec: [40]u8 = undefined;
+        if (!bridge.memRead(base + section_base + si * 40, &sec)) break;
+        const sec_name = std.mem.sliceTo(sec[0..8], 0);
+        const vsize = readU32LE(sec[8..12]);
+        const vrva = readU32LE(sec[12..16]);
+        const raw_size = readU32LE(sec[16..20]);
+        const sec_chars = readU32LE(sec[36..40]);
+        var flags_buf: [32]u8 = undefined;
+        var fi: usize = 0;
+        if (sec_chars & 0x20000000 != 0) {
+            flags_buf[fi] = 'X';
+            fi += 1;
+        }
+        if (sec_chars & 0x40000000 != 0) {
+            flags_buf[fi] = 'R';
+            fi += 1;
+        }
+        if (sec_chars & 0x80000000 != 0) {
+            flags_buf[fi] = 'W';
+            fi += 1;
+        }
+        const line = std.fmt.bufPrint(out[pos..], "  {s: <8}  VA=0x{X}  VSize=0x{X}  RawSize=0x{X}  [{s}]\n", .{
+            sec_name, vrva, vsize, raw_size, flags_buf[0..fi],
+        }) catch break;
+        pos += line.len;
+    }
+
+    if (pos == 0) return errResult(out, "Error: Could not analyze module.");
+    return .{ .text = out[0..pos] };
+}
+
+// ── DetectOEP ─────────────────────────────────────────────────────
+fn detectOEP(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
+    const mod_name = getParamStr(params, "module") orelse
+        return errResult(out, "Error: module is required.");
+
+    var expr_buf: [128]u8 = undefined;
+    const base_expr = std.fmt.bufPrint(&expr_buf, "{s}:0\x00", .{mod_name}) catch
+        return errResult(out, "Error: expression too long.");
+    const base = bridge.valFromString(@ptrCast(base_expr.ptr));
+    if (base == 0) return fmtErr(out, "Error: Module \"{s}\" not found.", .{mod_name});
+
+    var pe_hdr: [4]u8 = undefined;
+    if (!bridge.memRead(base + 0x3C, &pe_hdr)) return errResult(out, "Error: Cannot read PE header.");
+    const pe_off: usize = readU32LE(&pe_hdr);
+
+    var coff: [20]u8 = undefined;
+    if (!bridge.memRead(base + pe_off + 4, &coff)) return errResult(out, "Error: Cannot read COFF header.");
+    const num_sections = readU16LE(coff[2..4]);
+    const optional_size = readU16LE(coff[16..18]);
+
+    var opt: [4]u8 = undefined;
+    if (!bridge.memRead(base + pe_off + 24, &opt)) return errResult(out, "Error: Cannot read optional header.");
+    const magic = readU16LE(opt[0..2]);
+    const is_pe32_plus = (magic == 0x20b);
+    _ = is_pe32_plus;
+
+    var ep_buf: [4]u8 = undefined;
+    if (!bridge.memRead(base + pe_off + 24 + 16, &ep_buf)) return errResult(out, "Error: Cannot read EP.");
+    const ep_rva = readU32LE(&ep_buf);
+
+    const section_base = pe_off + 24 + optional_size;
+    var pos: usize = 0;
+
+    const hdr = std.fmt.bufPrint(out[pos..], "OEP Detection for {s}\nStated Entry Point: 0x{X} (RVA 0x{X})\n\n", .{ mod_name, base + ep_rva, ep_rva }) catch "";
+    pos += hdr.len;
+
+    var ep_in_section = false;
+    var suspicious = false;
+    var si: usize = 0;
+    while (si < num_sections and si < 64) : (si += 1) {
+        var sec: [40]u8 = undefined;
+        if (!bridge.memRead(base + section_base + si * 40, &sec)) break;
+        const sec_name = std.mem.sliceTo(sec[0..8], 0);
+        const vsize = readU32LE(sec[8..12]);
+        const vrva = readU32LE(sec[12..16]);
+        const raw_size = readU32LE(sec[16..20]);
+        const sec_chars = readU32LE(sec[36..40]);
+
+        if (ep_rva >= vrva and ep_rva < vrva + vsize) {
+            ep_in_section = true;
+            const line = std.fmt.bufPrint(out[pos..], "EP is in section \"{s}\" (RVA 0x{X}, size 0x{X})\n", .{ sec_name, vrva, vsize }) catch break;
+            pos += line.len;
+            if (sec_chars & 0x80000000 != 0 and sec_chars & 0x20000000 != 0) {
+                const warn = std.fmt.bufPrint(out[pos..], "  WARNING: Section is RWX - typical of packers!\n", .{}) catch break;
+                pos += warn.len;
+                suspicious = true;
+            }
+        }
+
+        if (raw_size == 0 and vsize > 0) {
+            const line = std.fmt.bufPrint(out[pos..], "Section \"{s}\" has raw_size=0 but vsize=0x{X} (unpacked data area)\n", .{ sec_name, vsize }) catch break;
+            pos += line.len;
+            suspicious = true;
+        }
+
+        if (sec_chars & 0x80000000 != 0 and sec_chars & 0x20000000 != 0) {
+            if (ep_rva < vrva or ep_rva >= vrva + vsize) {
+                const line = std.fmt.bufPrint(out[pos..], "Section \"{s}\" is RWX (potential unpack target)\n", .{sec_name}) catch break;
+                pos += line.len;
+            }
+        }
+    }
+
+    if (!ep_in_section) {
+        const warn = std.fmt.bufPrint(out[pos..], "WARNING: EP not in any section - highly suspicious!\n", .{}) catch "";
+        pos += warn.len;
+        suspicious = true;
+    }
+
+    if (suspicious) {
+        const tip = std.fmt.bufPrint(out[pos..], "\nPossibly packed. Set a hardware breakpoint on ESP at EP and run to find OEP.\n", .{}) catch "";
+        pos += tip.len;
+    } else {
+        const tip = std.fmt.bufPrint(out[pos..], "\nNo packing indicators detected. EP likely is OEP.\n", .{}) catch "";
+        pos += tip.len;
+    }
+
+    return .{ .text = out[0..pos] };
+}
+
+// ── GetDumpableRegions ────────────────────────────────────────────
+fn getDumpableRegions(_: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target is running. Pause first.");
+
+    const f = bridge.DbgMemMap orelse return errResult(out, "Error: Memory map not available.");
+    var memmap: bridge.MEMMAP = undefined;
+    if (f(&memmap) == 0) return errResult(out, "Error: Failed to get memory map.");
+    defer {
+        if (memmap.count > 0) {
+            if (bridge.BridgeFree) |free| free(@ptrCast(memmap.page));
+        }
+    }
+
+    var pos: usize = 0;
+    const hdr = std.fmt.bufPrint(out[pos..], "Dumpable Memory Regions:\n\n", .{}) catch "";
+    pos += hdr.len;
+
+    const page_count: usize = @intCast(memmap.count);
+    var count: usize = 0;
+    var pi: usize = 0;
+    while (pi < page_count and count < 200) : (pi += 1) {
+        const page = &memmap.page[pi];
+        const state = page.mbi_State;
+        const protect = page.mbi_Protect;
+        if (state != 0x1000) continue;
+        if (protect & 0x100 != 0) continue;
+
+        const base_addr = page.mbi_BaseAddress;
+        const region_size = page.mbi_RegionSize;
+        const info_str = bridge.cstrSlice(&page.info);
+
+        const prot = protectStr(protect);
+
+        const line = std.fmt.bufPrint(out[pos..], "0x{X}  Size=0x{X} ({d} KB)  {s}  {s}\n", .{
+            base_addr, region_size, region_size / 1024, prot, info_str,
+        }) catch break;
+        pos += line.len;
+        count += 1;
+    }
+
+    if (count == 0) return errResult(out, "Error: No dumpable regions found.");
+    const footer = std.fmt.bufPrint(out[pos..], "\nTotal: {d} dumpable regions\n", .{count}) catch "";
+    pos += footer.len;
+    return .{ .text = out[0..pos] };
+}
+
+// ── RestorePatches ────────────────────────────────────────────────
+fn restorePatches(_: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const ok = bridge.cmdExec("patchrestore\x00");
+    return fmtResult(out, "{s}", .{if (ok) "All patches restored to original bytes." else "Error: Failed to restore patches."});
 }

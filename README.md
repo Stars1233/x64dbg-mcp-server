@@ -31,7 +31,7 @@ Built with [Zig](https://ziglang.org/) — zero dependencies, single-binary outp
 
 ## Features
 
-- **51 MCP Tools:** Full debugger control — disassembly, stepping, breakpoints, memory, registers, modules, threads, call stack, pattern scanning, string extraction, xrefs, PEB/SEH inspection, tracing, and more.
+- **71 MCP Tools:** Full debugger control — disassembly, stepping, breakpoints, memory allocation, registers, modules, threads, call stack, pattern scanning, string extraction, xrefs, symbols, bookmarks, PE analysis, OEP detection, module dumping, PEB/SEH inspection, tracing, and more.
 - **22 Event Callbacks:** Full debugger event coverage — init, stop, breakpoint, exception, step, attach/detach, DLL load/unload, threads, and more.
 - **Zero Dependencies:** Pure native plugin, no runtime or framework needed.
 - **x32 and x64:** Single codebase, builds both architectures from one command.
@@ -105,7 +105,7 @@ AI: [calls StepOver x3, GetCallStack]
 
 ## Tools
 
-51 MCP tools covering the full x64dbg debugging workflow.
+71 MCP tools covering the full x64dbg debugging workflow.
 
 ### Always available
 | Tool | Description |
@@ -126,6 +126,7 @@ AI: [calls StepOver x3, GetCallStack]
 |------|-------------|
 | `GetCurrentAddress` | Current EIP/RIP with label and comment |
 | `Disassemble` | Disassemble N instructions at an address |
+| `DisassembleFunction` | Disassemble an entire function by boundaries |
 | `ReadMemory` | Hex dump of process memory |
 | `WaitForPause` | Block until target pauses |
 | `run` | Resume execution (F9) |
@@ -138,25 +139,45 @@ AI: [calls StepOver x3, GetCallStack]
 | `SetBreakpoint` | Set INT3 breakpoint at address/symbol |
 | `SetHardwareBreakpoint` | Set hardware breakpoint (DR0-DR3, read/write/execute) |
 | `SetConditionalBreakpoint` | Set breakpoint with condition expression and optional log |
+| `EnableBreakpoint` | Enable a breakpoint at a given address |
+| `DisableBreakpoint` | Disable a breakpoint without deleting it |
+| `ToggleBreakpoint` | Toggle a breakpoint between enabled and disabled |
 | `DeleteBreakpoint` | Remove a breakpoint |
+| `DeleteAllBreakpoints` | Remove all breakpoints (normal, hardware, memory) |
+| `ResetHitCount` | Reset a breakpoint's hit counter to zero |
 | `ListBreakpoints` | List all active breakpoints |
 | `GetAllRegisters` | Dump all general-purpose registers |
 | `SetRegister` | Set a CPU register value |
 | `GetCallStack` | Current thread call stack |
 | `GetThreads` | List all threads with IDs and instruction pointers |
 | `SwitchThread` | Switch active thread context |
+| `SuspendThread` | Suspend a thread by its thread ID |
+| `ResumeThread` | Resume a suspended thread |
 | `ListModules` | List loaded modules with base addresses and sizes |
 | `GetMemoryMap` | Memory regions with addresses, sizes, and protection |
+| `GetDumpableRegions` | List committed, readable memory regions |
+| `AllocateMemory` | Allocate memory in the target process |
+| `FreeMemory` | Free allocated memory in the target process |
 | `WriteMemToAddress` | Patch memory with hex bytes |
+| `RestorePatches` | Restore all patches to original bytes |
 | `Assemble` | Assemble an instruction at an address |
 | `CommentOrLabelAtAddress` | Add comment/label in disassembly |
+| `SetBookmark` | Set a bookmark at an address |
+| `DeleteBookmark` | Delete a bookmark |
+| `ListBookmarks` | List all bookmarks |
 | `GetImports` | Show module import table |
 | `GetExports` | Show module export table |
+| `SearchSymbols` | Search for symbols matching a pattern |
+| `ListSymbols` | List exported symbols of a module |
 | `GetPatches` | List all memory patches |
 | `FindPattern` | Scan module memory for byte pattern with ?? wildcards |
 | `GetStrings` | Extract ASCII strings from a module's memory |
 | `GetReferences` | Find CALL/JMP xrefs to a target address |
 | `GetFunctions` | List analyzed functions with addresses and labels |
+| `AnalyzeModule` | PE structure analysis: sections, EP, image size |
+| `DetectOEP` | Detect Original Entry Point for packed executables |
+| `DumpMemory` | Save memory region to file on disk |
+| `DumpModule` | Dump an entire module to a file |
 | `RunToAddress` | Run until hitting a specific address |
 | `TraceInto` | Step N instructions recording address + disassembly |
 | `FollowPointer` | Dereference pointer chain N levels deep |
@@ -164,7 +185,6 @@ AI: [calls StepOver x3, GetCallStack]
 | `GetSEHChain` | Walk Structured Exception Handler chain (x32) |
 | `GetPEB` | Read Process Environment Block fields |
 | `GetArguments` | Read function arguments from stack/registers |
-| `DumpMemory` | Save memory region to file on disk |
 
 
 ## Configuration
