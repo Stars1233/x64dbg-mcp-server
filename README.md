@@ -262,11 +262,11 @@ No polling, no external processes — the plugin lives inside x64dbg's address s
 
 ## Disclaimer
 
-This tool is intended for legitimate reverse engineering, malware analysis, security research, and educational purposes only. It provides full debugger control over running processes — including memory read/write, code execution, and process manipulation — over a network interface.
-
-By using this software, you accept full responsibility for how it is used. The author is not liable for any misuse, damage, or legal consequences resulting from the use of this tool. Always ensure you have proper authorization before debugging or analyzing any software.
-
-Do not expose the MCP server to untrusted networks. While Bearer token authentication is enforced, the server communicates over unencrypted HTTP.
+> This tool is intended for legitimate reverse engineering, malware analysis, security research, and educational purposes only. It provides full debugger control over running processes — including memory read/write, code execution, and process manipulation — over a network interface.
+>
+> By using this software, you accept full responsibility for how it is used. The author is not liable for any misuse, damage, or legal consequences resulting from the use of this tool. Always ensure you have proper authorization before debugging or analyzing any software.
+>
+> Do not expose the MCP server to untrusted networks. While Bearer token authentication is enforced, the server communicates over unencrypted HTTP.
 
 
 ---
