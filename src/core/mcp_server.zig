@@ -26,6 +26,7 @@ extern "kernel32" fn CreateThread(
     lpThreadId: ?*u32,
 ) callconv(.winapi) HANDLE;
 extern "kernel32" fn CloseHandle(hObject: HANDLE) callconv(.winapi) i32;
+extern "kernel32" fn WaitForSingleObject(hHandle: ?*anyopaque, dwMilliseconds: u32) callconv(.winapi) u32;
 
 var server_handle: HANDLE = null;
 pub var server_running: bool = false;
@@ -212,12 +213,23 @@ pub fn stop() void {
     if (!server_running) return;
     server_running = false;
 
+    // Close all SSE client sockets to unblock their keepalive loops
+    for (&sse_clients) |*slot| {
+        if (slot.* != INVALID_SOCKET) {
+            _ = ws2.closesocket(slot.*);
+            slot.* = INVALID_SOCKET;
+        }
+    }
+
+    // Close listen socket to unblock accept()
     if (listen_sock != INVALID_SOCKET) {
         _ = ws2.closesocket(listen_sock);
         listen_sock = INVALID_SOCKET;
     }
 
+    // Wait for server thread to exit (up to 5s)
     if (server_handle) |h| {
+        _ = WaitForSingleObject(h, 5000);
         _ = CloseHandle(h);
         server_handle = null;
     }
@@ -308,6 +320,9 @@ fn serverLoop() void {
             _ = CloseHandle(h);
         }
     }
+
+    // Let in-flight client handlers finish before thread exits
+    Sleep(200);
 }
 
 fn wsSend(sock: SOCKET, data: []const u8) void {
