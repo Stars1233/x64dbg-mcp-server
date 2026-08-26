@@ -35,7 +35,7 @@ Built with [Zig](https://ziglang.org/) — zero dependencies, single-binary outp
 
 ## Features
 
-- **71 MCP Tools:** Full debugger control — disassembly, stepping, breakpoints, memory allocation, registers, modules, threads, call stack, pattern scanning, string extraction, xrefs, symbols, bookmarks, PE analysis, OEP detection, module dumping, PEB/SEH inspection, tracing, and more.
+- **84 MCP Tools:** Full debugger control — disassembly, stepping, breakpoints, memory allocation, registers, modules, threads, call stack, pattern scanning, string extraction, xrefs, symbols, bookmarks, PE analysis, OEP detection, module dumping, PEB/SEH inspection, tracing, and more.
 - **22 Event Callbacks:** Full debugger event coverage — init, stop, breakpoint, exception, step, attach/detach, DLL load/unload, threads, and more.
 - **Zero Dependencies:** Pure native plugin, no runtime or framework needed.
 - **x32 and x64:** Single codebase, builds both architectures from one command.
@@ -116,7 +116,7 @@ AI: [calls StepOver x3, GetCallStack]
 
 ## Tools
 
-71 MCP tools covering the full x64dbg debugging workflow.
+72 MCP tools covering the full x64dbg debugging workflow.
 
 ### Always available
 | Tool | Description |
@@ -131,6 +131,7 @@ AI: [calls StepOver x3, GetCallStack]
 | `EvalExpression` | Evaluate any x64dbg expression (address, register, arithmetic) |
 | `AttachProcess` | Attach to a running process by PID |
 | `Echo` | Echo input back |
+| `WaitForEvent` | Long-poll for debugger events (breakpoint, pause, resume, exception) |
 
 ### Requires active debug session
 | Tool | Description |
@@ -196,6 +197,14 @@ AI: [calls StepOver x3, GetCallStack]
 | `GetSEHChain` | Walk Structured Exception Handler chain (x32) |
 | `GetPEB` | Read Process Environment Block fields |
 | `GetArguments` | Read function arguments from stack/registers |
+| `SetMemoryBreakpoint` | Set memory breakpoint (read/write/execute) |
+| `SetExceptionBreakpoint` | Configure exception breakpoint (break or ignore, first/second/all chance) |
+| `DeleteExceptionBreakpoint` | Delete an exception breakpoint |
+| `AnalyzeCode` | Run code analysis (function, module, or control flow) |
+| `TraceOver` | Trace N instructions stepping over calls |
+| `SetBreakpointCommand` | Set a command to execute when a breakpoint is hit |
+| `SetBreakpointFastResume` | Enable/disable fast resume (auto-continue) on a breakpoint |
+| `SaveDatabase` | Save the x64dbg database (.dd64/.dd32) |
 
 
 ## Configuration

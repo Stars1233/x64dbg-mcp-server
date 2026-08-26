@@ -12,7 +12,7 @@ const INVALID_SOCKET = ws2.INVALID_SOCKET;
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "x64dbg-MCP Server";
-const SERVER_VERSION = "1.0";
+const SERVER_VERSION = "1.1";
 
 // Win32 threading
 const HANDLE = ?*anyopaque;
@@ -81,6 +81,64 @@ fn parseIpAddr(ip: []const u8) u32 {
     return @bitCast(octets);
 }
 
+// ── Pending events queue (for HTTP clients that can't receive SSE) ──
+const MAX_PENDING_EVENTS = 16;
+const MAX_EVENT_LEN = 128;
+var pending_events: [MAX_PENDING_EVENTS][MAX_EVENT_LEN]u8 = undefined;
+var pending_event_lens: [MAX_PENDING_EVENTS]usize = .{0} ** MAX_PENDING_EVENTS;
+var pending_head: usize = 0;
+var pending_count: usize = 0;
+
+pub fn pendingHasEvents() bool {
+    return pending_count > 0;
+}
+
+pub fn pendingDrainToBuffer(out: []u8) usize {
+    var pos: usize = 0;
+    while (pending_count > 0) {
+        const slot = pending_head;
+        const event_text = pending_events[slot][0..pending_event_lens[slot]];
+        if (pos > 0 and pos < out.len) {
+            out[pos] = '\n';
+            pos += 1;
+        }
+        const copy_len = @min(event_text.len, out.len - pos);
+        if (copy_len == 0) break;
+        @memcpy(out[pos .. pos + copy_len], event_text[0..copy_len]);
+        pos += copy_len;
+        pending_head = (pending_head + 1) % MAX_PENDING_EVENTS;
+        pending_count -= 1;
+    }
+    return pos;
+}
+
+fn pendingPush(msg: []const u8) void {
+    const slot = (pending_head + pending_count) % MAX_PENDING_EVENTS;
+    const copy_len = @min(msg.len, MAX_EVENT_LEN);
+    @memcpy(pending_events[slot][0..copy_len], msg[0..copy_len]);
+    pending_event_lens[slot] = copy_len;
+    if (pending_count < MAX_PENDING_EVENTS) {
+        pending_count += 1;
+    } else {
+        pending_head = (pending_head + 1) % MAX_PENDING_EVENTS;
+    }
+}
+
+fn pendingDrain(w: *JsonWriter) void {
+    while (pending_count > 0) {
+        const slot = pending_head;
+        const event_text = pending_events[slot][0..pending_event_lens[slot]];
+        w.raw(",");
+        w.beginObject();
+        w.fieldStr("type", "text");
+        w.key("text");
+        w.writeString(event_text);
+        w.endObject();
+        pending_head = (pending_head + 1) % MAX_PENDING_EVENTS;
+        pending_count -= 1;
+    }
+}
+
 // ── SSE client tracking ────────────────────────────────────────────
 const MAX_SSE_CLIENTS = 8;
 var sse_clients: [MAX_SSE_CLIENTS]SOCKET = .{INVALID_SOCKET} ** MAX_SSE_CLIENTS;
@@ -130,6 +188,13 @@ fn sseSendEvent(sock: SOCKET, event: []const u8, data: []const u8) void {
 
 pub fn notifyEvent(level: []const u8, msg: []const u8) void {
     if (!server_running) return;
+
+    // Queue for HTTP clients — plain text with level prefix
+    var pend_buf: [MAX_EVENT_LEN]u8 = undefined;
+    const pend_msg = std.fmt.bufPrint(&pend_buf, "[event:{s}] {s}", .{ level, msg }) catch msg;
+    pendingPush(pend_msg);
+
+    // Push to SSE clients as JSON-RPC notification
     var buf: [1024]u8 = undefined;
     const json = std.fmt.bufPrint(&buf,
         "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{{\"level\":\"{s}\",\"data\":\"{s}\"}}}}",
@@ -621,27 +686,24 @@ fn buildInitializeResult(w: *JsonWriter) void {
         \\1. ALWAYS call GetDebugState first to understand the current state before doing anything.
         \\2. After every stepping operation (StepInto, StepOver, StepOut), the response includes the new address and disassembly. Read it carefully before deciding your next action.
         \\3. The target must be PAUSED to read memory, disassemble, or inspect state. If it is RUNNING, call PauseDebug or WaitForPause first.
-        \\4. After calling run, the target is usually RUNNING. Use WaitForPause to wait for a breakpoint hit before inspecting state.
+        \\4. After calling run, ALWAYS call WaitForEvent or WaitForPause immediately to detect breakpoint hits, exceptions, and state changes. NEVER go idle or ask the user to tell you when something happens — you MUST actively monitor by calling WaitForEvent. This is your only way to know when the debugger state changes over HTTP.
         \\5. Use EvalExpression to resolve symbols and addresses (e.g. kernel32:CreateFileA, cip, eax+4).
         \\6. When analyzing a binary: LoadBinary, then WaitForPause, then GetDebugState, then proceed with analysis.
-        \\7. Breakpoint workflow: SetBreakpoint, run, WaitForPause, then inspect state.
+        \\7. Breakpoint workflow: SetBreakpoint, run, WaitForEvent (or WaitForPause), then inspect state. Never wait for user confirmation — monitor actively.
         \\8. For function analysis: use DisassembleFunction (needs analysis, run ExecuteDebuggerCommand with analr <address> first).
         \\9. SearchSymbols searches exports across all loaded modules. Use it to find API functions.
         \\10. Keep track of what binary is loaded and where you are in the code. Reference addresses and module names in your explanations.
+        \\11. Every tool response includes a [state] line and any queued [event:*] lines from debugger events that fired since your last call. Always read these — they tell you exactly what happened.
+        \\12. When the user is interacting with the GUI (clicking buttons, navigating menus) while you wait for a breakpoint, call WaitForEvent with a longer timeout (e.g. 60000-120000ms) to stay monitoring. Loop WaitForEvent calls if needed until the expected event fires.
     );
     w.endObject();
 }
 
 fn buildToolsListResult(w: *JsonWriter) void {
-    const debugging = bridge.isDebugging();
-    const has_pid = debugging and bridge.valFromString("$pid") > 0;
-    const debugger_on = debugging and has_pid;
-
     w.beginObject();
     w.key("tools");
     w.beginArray();
     for (&tools_mod.tools) |*t| {
-        if (t.debug_only and !debugger_on) continue;
         w.beginObject();
         w.fieldStr("name", t.name);
         w.fieldStr("description", t.description);
@@ -688,6 +750,9 @@ fn buildToolsCallResult(w: *JsonWriter, root: std.json.Value) void {
             w.key("text");
             w.writeString(tr.text);
             w.endObject();
+
+            // Drain any pending events (breakpoint hit, paused, etc.) that arrived between calls
+            pendingDrain(w);
 
             // Append debugger state to every response (skip GetDebugState itself to avoid redundancy)
             if (!std.mem.eql(u8, name, "GetDebugState") and !std.mem.eql(u8, name, "Echo")) {
@@ -781,7 +846,7 @@ const CORS_HEADERS = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Met
 
 fn sendServerInfo(sock: SOCKET) void {
     const body =
-        \\{"name":"x64dbg-MCP Server","version":"1.0","transport":"streamable-http","endpoint":"/"}
+        \\{"name":"x64dbg-MCP Server","version":"1.1","transport":"streamable-http","endpoint":"/"}
     ;
     var buf: [512]u8 = undefined;
     const resp = std.fmt.bufPrint(&buf, "HTTP/1.1 200 OK\r\n" ++ CORS_HEADERS ++ "Content-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body }) catch return;

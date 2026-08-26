@@ -7,6 +7,7 @@ const bridge = @import("../core/bridge.zig");
 const json = @import("json.zig");
 const JsonWriter = json.JsonWriter;
 const main = @import("../main.zig");
+const mcp = @import("../core/mcp_server.zig");
 
 extern "kernel32" fn Sleep(dwMilliseconds: u32) callconv(.winapi) void;
 extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;
@@ -47,7 +48,7 @@ pub const tools = [_]ToolDef{
     },
     .{
         .name = "ExecuteDebuggerCommand",
-        .description = "Executes an arbitrary x64dbg command string. Example: ExecuteDebuggerCommand command=run",
+        .description = "Executes a native x64dbg command string (like 'erun', 'analr', 'graph'). This is for x64dbg-internal commands ONLY — do NOT pass MCP tool names here. MCP tools (WaitForEvent, GetDebugState, Disassemble, etc.) must be called directly as tools.",
         .debug_only = false,
         .read_only = false,
         .handler = executeDebuggerCommand,
@@ -109,6 +110,14 @@ pub const tools = [_]ToolDef{
         .handler = echo,
         .schema_fn = schemaEcho,
     },
+    .{
+        .name = "WaitForEvent",
+        .description = "Blocks until a debugger event fires (breakpoint hit, paused, resumed, exception, session start/stop) or timeout. Returns all events that occurred. Use this to monitor debugger state changes in real-time over HTTP — call it after 'run' or while waiting for the user to interact with the debugger.",
+        .debug_only = false,
+        .read_only = true,
+        .handler = waitForEvent,
+        .schema_fn = schemaWaitForEvent,
+    },
 
     // ── Debug-only ──────────────────────────────────────────────
     .{
@@ -137,11 +146,11 @@ pub const tools = [_]ToolDef{
     },
     .{
         .name = "run",
-        .description = "Resumes execution of the debugged process (equivalent to F9 / 'run'). Returns whether the process is now running or has paused at a breakpoint. Takes no arguments.",
+        .description = "Resumes execution and waits for the target to pause (breakpoint, exception, or exit). Blocks until a pause event occurs or timeout. Use timeoutMs to control how long to wait (default 120s). Always returns the reason for the pause and current state.",
         .debug_only = true,
         .read_only = false,
         .handler = runTarget,
-        .schema_fn = schemaNoParams,
+        .schema_fn = schemaRunTarget,
     },
     .{
         .name = "StepInto",
@@ -326,6 +335,14 @@ pub const tools = [_]ToolDef{
         .read_only = false,
         .handler = setHardwareBreakpoint,
         .schema_fn = schemaSetHardwareBreakpoint,
+    },
+    .{
+        .name = "SetMemoryBreakpoint",
+        .description = "Sets a memory breakpoint at an address. Triggers when memory is accessed (read/write/execute). Uses guard pages — slower than hardware breakpoints but no DR register limit.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = setMemoryBreakpoint,
+        .schema_fn = schemaSetMemoryBreakpoint,
     },
     .{
         .name = "GetPatches",
@@ -600,6 +617,62 @@ pub const tools = [_]ToolDef{
         .handler = restorePatches,
         .schema_fn = schemaNoParams,
     },
+    .{
+        .name = "SetExceptionBreakpoint",
+        .description = "Controls how an exception code is handled: break into debugger or pass to application. Use this to ignore Delphi (0EEDFADE), C++ (E06D7363), or other framework exceptions during startup, or to break on specific exceptions like ILLEGAL_INSTRUCTION (C000001D).",
+        .debug_only = true,
+        .read_only = false,
+        .handler = setExceptionBreakpoint,
+        .schema_fn = schemaSetExceptionBreakpoint,
+    },
+    .{
+        .name = "DeleteExceptionBreakpoint",
+        .description = "Removes an exception breakpoint, restoring default handling for that exception code.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = deleteExceptionBreakpoint,
+        .schema_fn = schemaExceptionCode,
+    },
+    .{
+        .name = "AnalyzeCode",
+        .description = "Runs x64dbg code analysis on a module or address range. This populates the function list, enables GetFunctions/GetReferences/DisassembleFunction. Must be run before those tools return useful results.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = analyzeCode,
+        .schema_fn = schemaAnalyzeCode,
+    },
+    .{
+        .name = "TraceOver",
+        .description = "Steps N instructions stepping OVER calls (like TraceInto but without diving into subroutines). Records address and disassembly of each step.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = traceOver,
+        .schema_fn = schemaTraceInto,
+    },
+    .{
+        .name = "SetBreakpointCommand",
+        .description = "Sets an x64dbg command to execute when a breakpoint at the given address is hit. Use for logging breakpoints (e.g., 'log {x:eax}' to log register values on hit).",
+        .debug_only = true,
+        .read_only = false,
+        .handler = setBreakpointCommand,
+        .schema_fn = schemaSetBreakpointCommand,
+    },
+    .{
+        .name = "SetBreakpointFastResume",
+        .description = "Makes a breakpoint auto-resume after hit without pausing. Combined with SetBreakpointCommand, creates logging breakpoints that record state at thousands of call sites without stopping.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = setBreakpointFastResume,
+        .schema_fn = schemaBreakpointAddrBool,
+    },
+    .{
+        .name = "SaveDatabase",
+        .description = "Saves the x64dbg database (labels, comments, breakpoints, analysis) for the current module. Persists your work across sessions.",
+        .debug_only = true,
+        .read_only = false,
+        .handler = saveDatabase,
+        .schema_fn = schemaNoParams,
+    },
 };
 
 // ── Schema helpers ──────────────────────────────────────────────────
@@ -632,12 +705,20 @@ fn schemaEcho(w: *JsonWriter) void {
     w.raw("{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"Message to echo.\"}},\"required\":[\"message\"]}");
 }
 
+fn schemaWaitForEvent(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"timeoutMs\":{\"type\":\"integer\",\"description\":\"Maximum wait time in milliseconds (default 30000, max 120000).\",\"default\":30000}},\"required\":[]}");
+}
+
 fn schemaReadMemory(w: *JsonWriter) void {
     w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Hex address or expression to read from.\"},\"size\":{\"type\":\"integer\",\"description\":\"Number of bytes to read (max 4096).\",\"default\":64}},\"required\":[\"address\"]}");
 }
 
 fn schemaWaitForPause(w: *JsonWriter) void {
     w.raw("{\"type\":\"object\",\"properties\":{\"timeoutMs\":{\"type\":\"integer\",\"description\":\"Maximum wait time in milliseconds.\",\"default\":30000}},\"required\":[]}");
+}
+
+fn schemaRunTarget(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"timeoutMs\":{\"type\":\"integer\",\"description\":\"Maximum time to wait for target to pause after resuming (default 300000ms = 5 minutes, max 600000ms = 10 minutes). The tool blocks until a breakpoint/exception fires or timeout.\",\"default\":300000}},\"required\":[]}");
 }
 
 fn schemaSetBreakpoint(w: *JsonWriter) void {
@@ -686,6 +767,10 @@ fn schemaModuleName(w: *JsonWriter) void {
 
 fn schemaSetHardwareBreakpoint(w: *JsonWriter) void {
     w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Address for the hardware breakpoint.\"},\"type\":{\"type\":\"string\",\"description\":\"Type: r (read), w (write), x (execute, default).\",\"default\":\"x\"},\"size\":{\"type\":\"integer\",\"description\":\"Size: 1, 2, 4, or 8 (default 1).\",\"default\":1}},\"required\":[\"address\"]}");
+}
+
+fn schemaSetMemoryBreakpoint(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Address for the memory breakpoint.\"},\"type\":{\"type\":\"string\",\"description\":\"Type: r (read/access), w (write), x (execute). Default: access (any).\"},\"singleshoot\":{\"type\":\"boolean\",\"description\":\"If true, breakpoint is removed after first hit (default false).\",\"default\":false}},\"required\":[\"address\"]}");
 }
 
 fn schemaFindPattern(w: *JsonWriter) void {
@@ -756,6 +841,26 @@ fn schemaDumpModule(w: *JsonWriter) void {
     w.raw("{\"type\":\"object\",\"properties\":{\"module\":{\"type\":\"string\",\"description\":\"Module name to dump.\"},\"filePath\":{\"type\":\"string\",\"description\":\"Output file path.\"}},\"required\":[\"module\",\"filePath\"]}");
 }
 
+fn schemaSetExceptionBreakpoint(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"exceptionCode\":{\"type\":\"string\",\"description\":\"Exception code in hex (e.g. C000001D, 0EEDFADE, E06D7363).\"},\"chance\":{\"type\":\"integer\",\"description\":\"1 = first-chance, 2 = second-chance, 3 = both (default 1).\",\"default\":1},\"action\":{\"type\":\"string\",\"description\":\"break = break into debugger, ignore = pass to application (default break).\",\"default\":\"break\"}},\"required\":[\"exceptionCode\"]}");
+}
+
+fn schemaExceptionCode(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"exceptionCode\":{\"type\":\"string\",\"description\":\"Exception code in hex to delete.\"}},\"required\":[\"exceptionCode\"]}");
+}
+
+fn schemaAnalyzeCode(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Address or module to analyze. If omitted, analyzes the current module.\"},\"type\":{\"type\":\"string\",\"description\":\"Analysis type: 'function' (analr - analyze single function), 'module' (anal - analyze module), 'controlflow' (cfanal - control flow analysis). Default: module.\",\"default\":\"module\"}},\"required\":[]}");
+}
+
+fn schemaSetBreakpointCommand(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Breakpoint address.\"},\"command\":{\"type\":\"string\",\"description\":\"x64dbg command to run on hit (e.g. 'log {x:eax}', 'msg {utf8@[esp+4]}').\"}},\"required\":[\"address\",\"command\"]}");
+}
+
+fn schemaBreakpointAddrBool(w: *JsonWriter) void {
+    w.raw("{\"type\":\"object\",\"properties\":{\"address\":{\"type\":\"string\",\"description\":\"Breakpoint address.\"},\"enable\":{\"type\":\"boolean\",\"description\":\"true to enable fast resume, false to disable.\",\"default\":true}},\"required\":[\"address\"]}");
+}
+
 // ── Tool implementations ────────────────────────────────────────────
 
 fn getParamStr(params: ?std.json.Value, field: []const u8) ?[]const u8 {
@@ -766,6 +871,16 @@ fn getParamStr(params: ?std.json.Value, field: []const u8) ?[]const u8 {
 fn getParamInt(params: ?std.json.Value, field: []const u8) ?i64 {
     const p = params orelse return null;
     return json.getIntField(p, field);
+}
+
+fn getParamBool(params: ?std.json.Value, field: []const u8) ?bool {
+    const p = params orelse return null;
+    const obj = p.object;
+    const val = obj.get(field) orelse return null;
+    return switch (val) {
+        .bool => |b| b,
+        else => null,
+    };
 }
 
 fn result(out: []u8, text: []const u8) ToolResult {
@@ -940,20 +1055,107 @@ fn loadBinary(params: ?std.json.Value, out: []u8) ToolResult {
 }
 
 // ── ExecuteDebuggerCommand ──────────────────────────────────────────
+const mcp_tool_names = [_][]const u8{
+    "WaitForEvent",     "WaitForPause",      "GetDebugState",     "LoadBinary",
+    "StepInto",         "StepOver",          "StepOut",           "SetBreakpoint",
+    "DeleteBreakpoint", "GetAllRegisters",   "Disassemble",       "ReadMemory",
+    "GetCallStack",     "ListModules",       "ListBreakpoints",   "GetMemoryMap",
+    "SetRegister",      "GetThreads",        "GetImports",        "GetExports",
+    "FindPattern",      "GetStrings",        "SearchSymbols",     "EvalExpression",
+    "AttachProcess",    "PauseDebug",        "StopDebug",         "RestartDebug",
+};
+
+fn isMcpToolName(cmd: []const u8) bool {
+    for (&mcp_tool_names) |name| {
+        if (std.ascii.eqlIgnoreCase(cmd, name)) return true;
+    }
+    return false;
+}
+
 fn executeDebuggerCommand(params: ?std.json.Value, out: []u8) ToolResult {
     const command = getParamStr(params, "command") orelse
         return errResult(out, "Error: command is required.");
+
+    // Intercept MCP tool names passed as x64dbg commands
+    const trimmed = std.mem.trim(u8, command, " \t\r\n");
+    const first_word = blk: {
+        const sp = std.mem.indexOf(u8, trimmed, " ") orelse trimmed.len;
+        break :blk trimmed[0..sp];
+    };
+    if (isMcpToolName(first_word)) {
+        return fmtResult(out, "Error: '{s}' is an MCP tool, not an x64dbg command. Call it directly as a tool (tools/call), not through ExecuteDebuggerCommand.", .{first_word});
+    }
+
+    const was_paused = !bridge.isRunning();
     var cmd_buf: [512]u8 = undefined;
     const cmd = std.fmt.bufPrint(&cmd_buf, "{s}\x00", .{command}) catch
         return errResult(out, "Error: command too long.");
     const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
-    return fmtResult(out, "{s}", .{if (ok) "Command executed successfully." else "Command execution failed."});
+    Sleep(250);
+
+    // If command resumed execution, block until target pauses again (up to 120s)
+    if (ok and was_paused and bridge.isRunning()) {
+        const start = @as(i64, @intCast(GetTickCount64()));
+        const timeout: i64 = 300000;
+        while (@as(i64, @intCast(GetTickCount64())) - start < timeout) {
+            if (!bridge.isDebugging())
+                return result(out, "Command executed. TARGET_EXITED — debug session ended.");
+            if (!bridge.isRunning()) {
+                const elapsed = @as(i64, @intCast(GetTickCount64())) - start;
+                var pos: usize = 0;
+                const hdr = std.fmt.bufPrint(out[pos..], "Command executed. PAUSED after {d}ms.", .{elapsed}) catch return errResult(out, "Error");
+                pos += hdr.len;
+                appendStepContext(out, &pos);
+                return .{ .text = out[0..pos] };
+            }
+            Sleep(100);
+        }
+        return result(out, "Command executed. Target still RUNNING after 5 minutes. Call run to keep monitoring — do NOT go idle.");
+    }
+
+    var pos: usize = 0;
+    const status = if (ok) "Command executed successfully." else "Command execution failed.";
+    const hdr = std.fmt.bufPrint(out[pos..], "{s}", .{status}) catch return errResult(out, "Error");
+    pos += hdr.len;
+    if (!bridge.isRunning() and bridge.isDebugging()) {
+        appendStepContext(out, &pos);
+    }
+    return .{ .text = out[0..pos] };
 }
 
 // ── Echo ────────────────────────────────────────────────────────────
 fn echo(params: ?std.json.Value, out: []u8) ToolResult {
     const msg = getParamStr(params, "message") orelse return result(out, "");
     return result(out, msg);
+}
+
+// ── WaitForEvent ────────────────────────────────────────────────────
+fn waitForEvent(params: ?std.json.Value, out: []u8) ToolResult {
+    var timeout_ms: i64 = 30000;
+    if (getParamInt(params, "timeoutMs")) |t| {
+        timeout_ms = @min(@max(t, 100), 120000);
+    }
+
+    // If events already queued, return immediately
+    if (mcp.pendingHasEvents()) {
+        const n = mcp.pendingDrainToBuffer(out);
+        return .{ .text = out[0..n] };
+    }
+
+    // Long-poll: wait for an event or timeout
+    const start = @as(i64, @intCast(GetTickCount64()));
+    while (@as(i64, @intCast(GetTickCount64())) - start < timeout_ms) {
+        if (mcp.pendingHasEvents()) {
+            const n = mcp.pendingDrainToBuffer(out);
+            return .{ .text = out[0..n] };
+        }
+        Sleep(100);
+    }
+
+    if (bridge.isRunning()) {
+        return result(out, "NO_EVENTS — target still RUNNING. Call WaitForEvent again to keep monitoring.");
+    }
+    return result(out, "NO_EVENTS — no debugger events within timeout.");
 }
 
 // ── ListCommandsByCategory ──────────────────────────────────────────
@@ -1087,21 +1289,41 @@ fn waitForPause(params: ?std.json.Value, out: []u8) ToolResult {
 }
 
 // ── run (F9) ────────────────────────────────────────────────────────
-fn runTarget(_: ?std.json.Value, out: []u8) ToolResult {
+fn runTarget(params: ?std.json.Value, out: []u8) ToolResult {
     if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
     _ = bridge.cmdExec("run");
     Sleep(250);
 
-    var pos: usize = 0;
-    if (bridge.isRunning()) {
-        const hdr = std.fmt.bufPrint(out[pos..], "Status: RUNNING. Use WaitForPause to wait for a breakpoint hit.", .{}) catch return errResult(out, "Error");
-        pos += hdr.len;
-    } else {
-        const hdr = std.fmt.bufPrint(out[pos..], "Status: PAUSED (hit breakpoint or system event).", .{}) catch return errResult(out, "Error");
+    if (!bridge.isRunning()) {
+        var pos: usize = 0;
+        const hdr = std.fmt.bufPrint(out[pos..], "PAUSED immediately (hit breakpoint or system event).", .{}) catch return errResult(out, "Error");
         pos += hdr.len;
         appendStepContext(out, &pos);
+        return .{ .text = out[0..pos] };
     }
-    return .{ .text = out[0..pos] };
+
+    // Block until target pauses, exits, or timeout (default 5 min)
+    var timeout_ms: i64 = 300000;
+    if (getParamInt(params, "timeoutMs")) |t| {
+        timeout_ms = @min(@max(t, 1000), 600000);
+    }
+
+    const start = @as(i64, @intCast(GetTickCount64()));
+    while (@as(i64, @intCast(GetTickCount64())) - start < timeout_ms) {
+        if (!bridge.isDebugging())
+            return result(out, "TARGET_EXITED. The debug session ended while running.");
+
+        if (!bridge.isRunning()) {
+            const elapsed = @as(i64, @intCast(GetTickCount64())) - start;
+            var pos: usize = 0;
+            const hdr = std.fmt.bufPrint(out[pos..], "PAUSED after {d}ms — breakpoint hit or exception.", .{elapsed}) catch return errResult(out, "Error");
+            pos += hdr.len;
+            appendStepContext(out, &pos);
+            return .{ .text = out[0..pos] };
+        }
+        Sleep(100);
+    }
+    return result(out, "TIMEOUT after 5 minutes — target still running. Call run again to keep monitoring — do NOT go idle or ask the user.");
 }
 
 // ── Step context helper ─────────────────────────────────────────────
@@ -1796,6 +2018,31 @@ fn setHardwareBreakpoint(params: ?std.json.Value, out: []u8) ToolResult {
         return errResult(out, "Error: input too long.");
     const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
     return fmtResult(out, "{s}", .{if (ok) "Hardware breakpoint set." else "Failed to set hardware breakpoint."});
+}
+
+// ── SetMemoryBreakpoint ────────────────────────────────────────────
+fn setMemoryBreakpoint(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr_str = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    const bp_type = getParamStr(params, "type") orelse "";
+    const singleshoot = getParamBool(params, "singleshoot") orelse false;
+
+    var cmd_buf: [256]u8 = undefined;
+    const cmd = if (bp_type.len > 0)
+        std.fmt.bufPrint(&cmd_buf, "bpm {s}, 0, {s}\x00", .{ addr_str, bp_type }) catch
+            return errResult(out, "Error: input too long.")
+    else
+        std.fmt.bufPrint(&cmd_buf, "bpm {s}\x00", .{addr_str}) catch
+            return errResult(out, "Error: input too long.");
+
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    if (ok and singleshoot) {
+        var ss_buf: [256]u8 = undefined;
+        const ss_cmd = std.fmt.bufPrint(&ss_buf, "SetBreakpointSingleshoot {s}\x00", .{addr_str}) catch "";
+        if (ss_cmd.len > 0) _ = bridge.cmdExec(@ptrCast(ss_cmd.ptr));
+    }
+    return fmtResult(out, "{s}", .{if (ok) "Memory breakpoint set." else "Failed to set memory breakpoint."});
 }
 
 // ── GetPatches ─────────────────────────────────────────────────────
@@ -3206,4 +3453,132 @@ fn restorePatches(_: ?std.json.Value, out: []u8) ToolResult {
     if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
     const ok = bridge.cmdExec("patchrestore\x00");
     return fmtResult(out, "{s}", .{if (ok) "All patches restored to original bytes." else "Error: Failed to restore patches."});
+}
+
+// ── SetExceptionBreakpoint ───────────────────────────────────────
+fn setExceptionBreakpoint(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const code = getParamStr(params, "exceptionCode") orelse
+        return errResult(out, "Error: exceptionCode is required.");
+    const chance = getParamInt(params, "chance") orelse 1;
+    const action = getParamStr(params, "action") orelse "break";
+    const is_ignore = std.mem.eql(u8, action, "ignore");
+    var cmd_buf: [256]u8 = undefined;
+    if (is_ignore) {
+        const cmd = std.fmt.bufPrint(&cmd_buf, "DisableExceptionBPX {s}\x00", .{code}) catch
+            return errResult(out, "Error: input too long.");
+        _ = bridge.cmdExec(@ptrCast(cmd.ptr));
+        return fmtResult(out, "Exception {s} set to pass to application (ignore).", .{code});
+    } else {
+        const cmd = std.fmt.bufPrint(&cmd_buf, "SetExceptionBPX {s}, {d}\x00", .{ code, chance }) catch
+            return errResult(out, "Error: input too long.");
+        const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+        return fmtResult(out, "{s}", .{if (ok) "Exception breakpoint set." else "Failed to set exception breakpoint."});
+    }
+}
+
+// ── DeleteExceptionBreakpoint ────────────────────────────────────
+fn deleteExceptionBreakpoint(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const code = getParamStr(params, "exceptionCode") orelse
+        return errResult(out, "Error: exceptionCode is required.");
+    var cmd_buf: [256]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "DeleteExceptionBPX {s}\x00", .{code}) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Exception breakpoint deleted." else "Failed to delete exception breakpoint."});
+}
+
+// ── AnalyzeCode ──────────────────────────────────────────────────
+fn analyzeCode(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse "";
+    const atype = getParamStr(params, "type") orelse "module";
+
+    var cmd_buf: [256]u8 = undefined;
+    if (std.mem.eql(u8, atype, "function")) {
+        if (addr.len > 0) {
+            const cmd = std.fmt.bufPrint(&cmd_buf, "analr {s}\x00", .{addr}) catch
+                return errResult(out, "Error: input too long.");
+            const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+            return fmtResult(out, "{s}", .{if (ok) "Function analysis completed." else "Analysis failed."});
+        } else {
+            const ok = bridge.cmdExec("analr cip\x00");
+            return fmtResult(out, "{s}", .{if (ok) "Function analysis at CIP completed." else "Analysis failed."});
+        }
+    } else if (std.mem.eql(u8, atype, "controlflow")) {
+        const ok = bridge.cmdExec("cfanal\x00");
+        return fmtResult(out, "{s}", .{if (ok) "Control flow analysis completed." else "Analysis failed."});
+    } else {
+        if (addr.len > 0) {
+            const cmd = std.fmt.bufPrint(&cmd_buf, "anal {s}\x00", .{addr}) catch
+                return errResult(out, "Error: input too long.");
+            const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+            return fmtResult(out, "{s}", .{if (ok) "Module analysis completed. GetFunctions and GetReferences now available." else "Analysis failed."});
+        } else {
+            const ok = bridge.cmdExec("anal\x00");
+            return fmtResult(out, "{s}", .{if (ok) "Module analysis completed. GetFunctions and GetReferences now available." else "Analysis failed."});
+        }
+    }
+}
+
+// ── TraceOver ────────────────────────────────────────────────────
+fn traceOver(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    if (bridge.isRunning()) return errResult(out, "Error: Target must be PAUSED.");
+
+    var count: i64 = 10;
+    if (getParamInt(params, "count")) |c| count = @min(@max(c, 1), 100);
+
+    var pos: usize = 0;
+    var i: i64 = 0;
+    while (i < count) : (i += 1) {
+        if (bridge.isRunning()) break;
+        _ = bridge.cmdExec("sto\x00");
+        Sleep(50);
+        while (bridge.isRunning()) Sleep(10);
+
+        const cip = bridge.valFromString("cip");
+        var dis_buf: [256]u8 = undefined;
+        const has_dis = if (bridge.GuiGetDisassembly) |f| f(cip, &dis_buf) != 0 else false;
+        const dis_text = if (has_dis) bridge.cstrSlice(&dis_buf) else "???";
+        const line = std.fmt.bufPrint(out[pos..], "0x{X}: {s}\n", .{ cip, dis_text }) catch break;
+        pos += line.len;
+    }
+    if (pos == 0) return errResult(out, "Error: Could not trace.");
+    return .{ .text = out[0..pos] };
+}
+
+// ── SetBreakpointCommand ─────────────────────────────────────────
+fn setBreakpointCommand(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    const command = getParamStr(params, "command") orelse
+        return errResult(out, "Error: command is required.");
+    var cmd_buf: [512]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "SetBreakpointCommand {s}, {s}\x00", .{ addr, command }) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Breakpoint command set." else "Failed to set breakpoint command."});
+}
+
+// ── SetBreakpointFastResume ──────────────────────────────────────
+fn setBreakpointFastResume(params: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const addr = getParamStr(params, "address") orelse
+        return errResult(out, "Error: address is required.");
+    const enable = getParamBool(params, "enable") orelse true;
+    var cmd_buf: [256]u8 = undefined;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "SetBreakpointFastResume {s}, {d}\x00", .{ addr, @as(u8, if (enable) 1 else 0) }) catch
+        return errResult(out, "Error: input too long.");
+    const ok = bridge.cmdExec(@ptrCast(cmd.ptr));
+    return fmtResult(out, "{s}", .{if (ok) "Breakpoint fast resume set." else "Failed to set fast resume."});
+}
+
+// ── SaveDatabase ─────────────────────────────────────────────────
+fn saveDatabase(_: ?std.json.Value, out: []u8) ToolResult {
+    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
+    const ok = bridge.cmdExec("dbsave\x00");
+    return fmtResult(out, "{s}", .{if (ok) "Database saved." else "Failed to save database."});
 }
