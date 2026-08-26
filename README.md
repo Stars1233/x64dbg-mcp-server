@@ -1,16 +1,18 @@
-# x64dbg-MCP Server
-
-![Stars](https://img.shields.io/github/stars/duty1g/x64dbg-mcp-server)
-[![Version](https://img.shields.io/github/v/release/duty1g/x64dbg-mcp-server)](https://github.com/duty1g/x64dbg-mcp-server/releases)
-[![Downloads](https://img.shields.io/github/downloads/duty1g/x64dbg-mcp-server/total)](https://github.com/duty1g/x64dbg-mcp-server/releases)
-![alt text](https://img.shields.io/github/languages/top/duty1g/x64dbg-mcp-server)
-[![License](https://img.shields.io/badge/License-MIT-green)](./LICENSE)
-[![Red Team](https://img.shields.io/badge/Red-Team-red)](https://duty1g.online)
-[![Reverse Engineering](https://img.shields.io/badge/Reverse%20Engineering-purple)](https://duty1g.online)
-<a href="https://twitter.com/duty_1g"><img src="https://img.shields.io/twitter/follow/duty_1g.svg?logo=twitter"></a>
-
 <p align="center"><img src="https://raw.githubusercontent.com/duty1g/x64dbg-mcp-server/main/logo.png" width="75%"/></p>
+
+<h1 align="center">x64dbg-MCP Server</h1>
 <h4 align="center">MCP-powered agentic reverse engineering for x64dbg.</h4>
+
+<p align="center">
+  <img src="https://img.shields.io/github/stars/duty1g/x64dbg-mcp-server" alt="Stars"/>
+  <a href="https://github.com/duty1g/x64dbg-mcp-server/releases"><img src="https://img.shields.io/github/v/release/duty1g/x64dbg-mcp-server" alt="Version"/></a>
+  <a href="https://github.com/duty1g/x64dbg-mcp-server/releases"><img src="https://img.shields.io/github/downloads/duty1g/x64dbg-mcp-server/total" alt="Downloads"/></a>
+  <img src="https://img.shields.io/github/languages/top/duty1g/x64dbg-mcp-server" alt="Language"/>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"/></a>
+  <a href="https://duty1g.online"><img src="https://img.shields.io/badge/Red-Team-red" alt="Red Team"/></a>
+  <a href="https://duty1g.online"><img src="https://img.shields.io/badge/Reverse%20Engineering-purple" alt="Reverse Engineering"/></a>
+  <a href="https://twitter.com/duty_1g"><img src="https://img.shields.io/twitter/follow/duty_1g.svg?logo=twitter" alt="Twitter"/></a>
+</p>
 
 <p align="center">
   <a href="#features">Features</a> •
