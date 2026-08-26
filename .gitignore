@@ -11,3 +11,4 @@ zig-cache/
 *.o
 *.exe
 mcp_config.json
+.mcp.json

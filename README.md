@@ -40,7 +40,8 @@ Built with [Zig](https://ziglang.org/) — zero dependencies, single-binary outp
 - **Zero Dependencies:** Pure native plugin, no runtime or framework needed.
 - **x32 and x64:** Single codebase, builds both architectures from one command.
 - **Dual Transport:** Streamable HTTP + SSE — compatible with any MCP client (new and legacy).
-- **Config Dialog:** Change IP/port from the Plugins menu, auto-restarts the server on save.
+- **Bearer Auth:** Optional token authentication — generate a token from the config dialog, required when binding to `0.0.0.0` to prevent unauthorized access.
+- **Config Dialog:** Change IP/port/token from the Plugins menu, auto-restarts the server on save.
 - **Auto-Start:** MCP server starts automatically when x64dbg launches.
 - **Cross-Compile:** Build Windows plugins from Linux, macOS, or WSL.
 
@@ -68,6 +69,21 @@ Add to your MCP client config (`.mcp.json`, etc.):
     "x64dbg": {
       "type": "http",
       "url": "http://localhost:9094/"
+    }
+  }
+}
+```
+
+**With authentication (recommended when binding to 0.0.0.0):**
+```json
+{
+  "mcpServers": {
+    "x64dbg": {
+      "type": "http",
+      "url": "http://localhost:9094/",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      }
     }
   }
 }
@@ -193,10 +209,14 @@ AI: [calls StepOver x3, GetCallStack]
 
 ## Configuration
 
-Go to **Plugins > x64dbg-MCP Server > Configure MCP Server...** to change the bind address and port.
+Go to **Plugins > x64dbg-MCP Server > Configure MCP Server...** to change the bind address, port, and auth token.
 
 - `0.0.0.0` — listen on all interfaces (for WSL/remote access)
 - `127.0.0.1` — local-only access
+
+### Authentication
+
+When binding to `0.0.0.0`, anyone on the network can reach the MCP server — which has full debugger control and can read/write process memory. Click **Generate** in the config dialog to create a random Bearer token. Clients must include it as an `Authorization: Bearer <token>` header on every request or they receive `401 Unauthorized`. Leave the token empty to disable auth (safe for `127.0.0.1`).
 
 Changes take effect immediately — the server auto-restarts on save. Config is persisted to `mcp_config.json` next to the x64dbg executable.
 

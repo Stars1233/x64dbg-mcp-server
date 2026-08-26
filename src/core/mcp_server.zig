@@ -34,8 +34,10 @@ var listen_sock: SOCKET = INVALID_SOCKET;
 pub var server_port: u16 = 9094;
 var server_ip: [64]u8 = .{ '0', '.', '0', '.', '0', '.', '0' } ++ .{0} ** 57;
 var server_ip_len: usize = 7;
+var auth_token: [64]u8 = .{0} ** 64;
+var auth_token_len: usize = 0;
 
-pub fn setConfig(ip: []const u8, port: u16) void {
+pub fn setConfig(ip: []const u8, port: u16, token: []const u8) void {
     server_port = port;
     if (ip.len > 0 and ip.len < 64) {
         @memcpy(server_ip[0..ip.len], ip);
@@ -44,6 +46,12 @@ pub fn setConfig(ip: []const u8, port: u16) void {
         const default = "0.0.0.0";
         @memcpy(server_ip[0..default.len], default);
         server_ip_len = default.len;
+    }
+    if (token.len > 0 and token.len <= 64) {
+        @memcpy(auth_token[0..token.len], token);
+        auth_token_len = token.len;
+    } else {
+        auth_token_len = 0;
     }
 }
 
@@ -346,6 +354,25 @@ fn handleClient(sock: SOCKET) void {
         wsSend(sock, "HTTP/1.1 204 No Content\r\n" ++ CORS_HEADERS ++ "\r\n");
         _ = ws2.closesocket(sock);
         return;
+    }
+
+    if (auth_token_len > 0) {
+        const headers_slice = if (findHeaderEnd(request)) |he| request[0..he] else request;
+        const token = parseHeaderValue(headers_slice, "Authorization");
+        var authorized = false;
+        if (token) |t| {
+            if (t.len > 7 and std.mem.eql(u8, t[0..7], "Bearer ")) {
+                const bearer = t[7..];
+                if (bearer.len == auth_token_len and std.mem.eql(u8, bearer, auth_token[0..auth_token_len])) {
+                    authorized = true;
+                }
+            }
+        }
+        if (!authorized) {
+            wsSend(sock, "HTTP/1.1 401 Unauthorized\r\n" ++ CORS_HEADERS ++ "Content-Length: 24\r\n\r\n{\"error\":\"Unauthorized\"}");
+            _ = ws2.closesocket(sock);
+            return;
+        }
     }
 
     if (std.mem.startsWith(u8, method_line, "GET ")) {
