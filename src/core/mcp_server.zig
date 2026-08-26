@@ -128,6 +128,20 @@ fn sseSendEvent(sock: SOCKET, event: []const u8, data: []const u8) void {
     wsSend(sock, "\n\n");
 }
 
+pub fn notifyEvent(level: []const u8, msg: []const u8) void {
+    if (!server_running) return;
+    var buf: [1024]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf,
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{{\"level\":\"{s}\",\"data\":\"{s}\"}}}}",
+        .{ level, msg },
+    ) catch return;
+    for (0..MAX_SSE_CLIENTS) |i| {
+        if (sse_clients[i] != INVALID_SOCKET) {
+            sseSendEvent(sse_clients[i], "message", json);
+        }
+    }
+}
+
 fn fmtU32(val: u32, buf: *[32]u8) usize {
     if (val == 0) { buf[0] = '0'; return 1; }
     var v = val;
@@ -674,6 +688,21 @@ fn buildToolsCallResult(w: *JsonWriter, root: std.json.Value) void {
             w.key("text");
             w.writeString(tr.text);
             w.endObject();
+
+            // Append debugger state to every response (skip GetDebugState itself to avoid redundancy)
+            if (!std.mem.eql(u8, name, "GetDebugState") and !std.mem.eql(u8, name, "Echo")) {
+                var state_buf: [256]u8 = undefined;
+                const state_str = buildStateSnippet(&state_buf);
+                if (state_str.len > 0) {
+                    w.raw(",");
+                    w.beginObject();
+                    w.fieldStr("type", "text");
+                    w.key("text");
+                    w.writeString(state_str);
+                    w.endObject();
+                }
+            }
+
             w.endArray();
             w.raw(",");
             if (tr.is_error) {
@@ -684,6 +713,31 @@ fn buildToolsCallResult(w: *JsonWriter, root: std.json.Value) void {
         }
     }
     w.raw("{\"error\":\"Tool not found.\"}");
+}
+
+fn buildStateSnippet(buf: *[256]u8) []const u8 {
+    const debugging = bridge.isDebugging();
+    if (!debugging) {
+        const s = "[state] NO_TARGET";
+        @memcpy(buf[0..s.len], s);
+        return buf[0..s.len];
+    }
+    const running = bridge.isRunning();
+    if (running) {
+        const s = "[state] RUNNING — call WaitForPause before inspecting";
+        @memcpy(buf[0..s.len], s);
+        return buf[0..s.len];
+    }
+    const cip = bridge.valFromString("cip");
+    var mod_buf: [bridge.MAX_MODULE_SIZE]u8 = undefined;
+    const has_mod = bridge.getModuleAt(cip, &mod_buf);
+    const mod_name = if (has_mod) bridge.cstrSlice(&mod_buf) else "unknown";
+
+    var dis_buf: [256]u8 = undefined;
+    const has_dis = if (bridge.GuiGetDisassembly) |f| f(cip, &dis_buf) != 0 else false;
+    const dis_text = if (has_dis) bridge.cstrSlice(&dis_buf) else "";
+
+    return std.fmt.bufPrint(buf, "[state] PAUSED at 0x{X} ({s}) | {s}", .{ cip, mod_name, dis_text }) catch buf[0..0];
 }
 
 fn parseQueryParam(path: []const u8, param: []const u8) ?[]const u8 {

@@ -346,10 +346,12 @@ fn logAndPush(msg: []const u8) void {
 
 fn cbInitDebug(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
     logAndPush("[x64dbg-MCP Server] Debug session started.\x00");
+    mcp.notifyEvent("info", "Debug session started. Binary loaded.");
 }
 
 fn cbStopDebug(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
     logAndPush("[x64dbg-MCP Server] Debug session stopped.\x00");
+    mcp.notifyEvent("info", "Debug session stopped. No target.");
 }
 
 fn cbCreateProcess(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
@@ -370,6 +372,7 @@ fn cbExitThread(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
 
 fn cbSystemBreakpoint(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
     logAndPush("[x64dbg-MCP Server] System breakpoint.\x00");
+    mcp.notifyEvent("info", "System breakpoint hit. Target is now PAUSED at entry point.");
 }
 
 fn cbLoadDll(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
@@ -416,18 +419,23 @@ fn cbException(_: bridge.CBTYPE, info: *anyopaque) callconv(.c) void {
     @memcpy(log_buf[log_prefix.len .. log_prefix.len + pos], buf[0..pos]);
     log_buf[log_prefix.len + pos] = 0;
     bridge.logPuts(@ptrCast(&log_buf));
+
+    mcp.notifyEvent("error", buf[0..pos]);
 }
 
 fn cbBreakpoint(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
     logAndPush("[x64dbg-MCP Server] Breakpoint hit.\x00");
+    mcp.notifyEvent("warning", "Breakpoint hit. Target is now PAUSED. Call GetDebugState to inspect.");
 }
 
 fn cbPauseDebug(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
     logAndPush("[x64dbg-MCP Server] Debugger paused.\x00");
+    mcp.notifyEvent("info", "Debugger paused. Target is now PAUSED. Call GetDebugState to inspect.");
 }
 
 fn cbResumeDebug(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
     logAndPush("[x64dbg-MCP Server] Debugger resumed.\x00");
+    mcp.notifyEvent("info", "Debugger resumed. Target is now RUNNING.");
 }
 
 fn cbStepped(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
