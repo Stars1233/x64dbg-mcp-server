@@ -68,18 +68,6 @@ Add to your MCP client config (`.mcp.json`, etc.):
   "mcpServers": {
     "x64dbg": {
       "type": "http",
-      "url": "http://localhost:9094/"
-    }
-  }
-}
-```
-
-**With authentication (required):**
-```json
-{
-  "mcpServers": {
-    "x64dbg": {
-      "type": "http",
       "url": "http://localhost:9094/",
       "headers": {
         "Authorization": "Bearer YOUR_TOKEN_HERE"
@@ -95,7 +83,10 @@ Add to your MCP client config (`.mcp.json`, etc.):
   "mcpServers": {
     "x64dbg": {
       "type": "sse",
-      "url": "http://localhost:9094/sse"
+      "url": "http://localhost:9094/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      }
     }
   }
 }
