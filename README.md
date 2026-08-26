@@ -1,6 +1,7 @@
 # x64dbg-MCP Server
 
 ![Stars](https://img.shields.io/github/stars/duty1g/x64dbg-mcp-server)
+![Downloads](https://img.shields.io/github/downloads/duty1g/x64dbg-mcp-server/total)
 ![alt text](https://img.shields.io/github/languages/top/duty1g/x64dbg-mcp-server)
 ![License](https://img.shields.io/badge/License-MIT-green)
 [![Red Team](https://img.shields.io/badge/Red-Team-red)](https://duty1g.online)
