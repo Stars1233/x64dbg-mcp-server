@@ -319,7 +319,7 @@ fn fmtHexAddr(val: usize, buf: []u8) usize {
 fn showAbout() void {
     _ = MessageBoxA(
         @ptrFromInt(host_hwnd),
-        "x64dbg-MCP Server v1.0\n\nNative MCP plugin for x64dbg.\nProtocol: MCP 2024-11-05 (Streamable HTTP + SSE)\n\nAuthor: duty1g\nhttps://github.com/duty1g\x00",
+        "x64dbg-MCP Server v" ++ mcp.SERVER_VERSION ++ "\n\nNative MCP plugin for x64dbg.\nProtocol: MCP 2024-11-05 (Streamable HTTP + SSE)\n\nAuthor: duty1g\nhttps://github.com/duty1g\x00",
         "x64dbg-MCP Server\x00",
         0x40,
     );

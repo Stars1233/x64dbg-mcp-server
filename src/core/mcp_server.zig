@@ -12,7 +12,7 @@ const INVALID_SOCKET = ws2.INVALID_SOCKET;
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "x64dbg-MCP Server";
-const SERVER_VERSION = "1.1";
+pub const SERVER_VERSION = "1.2";
 
 // Win32 threading
 const HANDLE = ?*anyopaque;
@@ -33,8 +33,8 @@ pub var server_running: bool = false;
 var listen_sock: SOCKET = INVALID_SOCKET;
 
 pub var server_port: u16 = 9094;
-var server_ip: [64]u8 = .{ '0', '.', '0', '.', '0', '.', '0' } ++ .{0} ** 57;
-var server_ip_len: usize = 7;
+var server_ip: [64]u8 = .{ '1', '2', '7', '.', '0', '.', '0', '.', '1' } ++ .{0} ** 55;
+var server_ip_len: usize = 9;
 var auth_token: [64]u8 = .{0} ** 64;
 var auth_token_len: usize = 0;
 
@@ -44,7 +44,7 @@ pub fn setConfig(ip: []const u8, port: u16, token: []const u8) void {
         @memcpy(server_ip[0..ip.len], ip);
         server_ip_len = ip.len;
     } else {
-        const default = "0.0.0.0";
+        const default = "127.0.0.1";
         @memcpy(server_ip[0..default.len], default);
         server_ip_len = default.len;
     }
@@ -428,7 +428,7 @@ fn wsRecv(sock: SOCKET) RecvResult {
 
         if (findHeaderEnd(result.buf[0..result.len])) |header_end| {
             const content_length = parseContentLength(result.buf[0..header_end]);
-            if (content_length == 0 or result.len >= header_end + 4 + content_length) break;
+            if (content_length == 0 or result.len >= header_end +| 4 +| content_length) break;
         }
     }
     return result;
@@ -845,9 +845,8 @@ fn parseHeaderValue(headers: []const u8, name: []const u8) ?[]const u8 {
 const CORS_HEADERS = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, DELETE\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, Mcp-Session-Id, Accept\r\nAccess-Control-Expose-Headers: Mcp-Session-Id\r\n";
 
 fn sendServerInfo(sock: SOCKET) void {
-    const body =
-        \\{"name":"x64dbg-MCP Server","version":"1.1","transport":"streamable-http","endpoint":"/"}
-    ;
+    var body_buf: [256]u8 = undefined;
+    const body = std.fmt.bufPrint(&body_buf, "{{\"name\":\"{s}\",\"version\":\"{s}\",\"transport\":\"streamable-http\",\"endpoint\":\"/\"}}", .{ SERVER_NAME, SERVER_VERSION }) catch return;
     var buf: [512]u8 = undefined;
     const resp = std.fmt.bufPrint(&buf, "HTTP/1.1 200 OK\r\n" ++ CORS_HEADERS ++ "Content-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body }) catch return;
     wsSend(sock, resp);

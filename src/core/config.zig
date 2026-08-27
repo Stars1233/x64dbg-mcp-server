@@ -203,7 +203,7 @@ fn getConfigPath() [*:0]const u8 {
 pub fn load() Config {
     const default_port: u16 = if (@sizeOf(usize) == 8) 9094 else 9095;
     var cfg = Config{ .port = default_port };
-    const default_ip = "0.0.0.0";
+    const default_ip = "127.0.0.1";
     @memcpy(cfg.ip[0..default_ip.len], default_ip);
     cfg.ip_len = default_ip.len;
 

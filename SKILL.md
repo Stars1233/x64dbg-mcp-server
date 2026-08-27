@@ -283,3 +283,18 @@ When analyzing code, always tell the user:
 - What the call stack context means
 
 Reference concrete addresses and module names — never say "the current function" without saying which one.
+
+---
+
+## Rule 8: Debugging GUI / Message Loop Apps
+
+When the target is RUNNING in a message loop (waiting for user input, showing a dialog, sitting at a UI screen), `run` will time out because no breakpoint is being hit. Do NOT fall back to static file analysis — use the debugger properly.
+
+Strategies:
+- **PauseDebug** — pause the target at any time, inspect state, then resume. The app freezes briefly but you get full debugger access.
+- **Set API breakpoints before resuming** — breakpoint on APIs the app will call when the user interacts (e.g. `GetMessageA`, `SendMessageA`, `CreateFileA`, `ReadFile`, button handlers). The target pauses when the user triggers that code path.
+- **WaitForEvent with long timeout** — if the user is about to interact with the GUI, call `WaitForEvent(timeoutMs: 120000)` to watch for breakpoint hits or exceptions while they click around.
+- **SetBreakpointFastResume + SetBreakpointCommand** — for logging without pausing: set a BP with a log command and fast resume. The target keeps running while you collect data.
+- **Hardware breakpoints on data** — if you know which memory the app reads/writes when the user acts, set a hardware BP on it. The target pauses when that memory is accessed.
+
+Never give up and read the binary file from disk. The debugger can always pause, inspect, and resume.
