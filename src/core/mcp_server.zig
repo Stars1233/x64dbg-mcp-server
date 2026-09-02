@@ -37,9 +37,11 @@ var server_ip: [64]u8 = .{ '1', '2', '7', '.', '0', '.', '0', '.', '1' } ++ .{0}
 var server_ip_len: usize = 9;
 var auth_token: [64]u8 = .{0} ** 64;
 var auth_token_len: usize = 0;
+var auth_enabled: bool = true;
 
-pub fn setConfig(ip: []const u8, port: u16, token: []const u8) void {
+pub fn setConfig(ip: []const u8, port: u16, token: []const u8, auth: bool) void {
     server_port = port;
+    auth_enabled = auth;
     if (ip.len > 0 and ip.len < 64) {
         @memcpy(server_ip[0..ip.len], ip);
         server_ip_len = ip.len;
@@ -450,7 +452,7 @@ fn handleClient(sock: SOCKET) void {
         return;
     }
 
-    {
+    if (auth_enabled) {
         const headers_slice = if (findHeaderEnd(request)) |he| request[0..he] else request;
         const tok = parseHeaderValue(headers_slice, "Authorization");
         var authorized = false;

@@ -113,6 +113,10 @@ const SM_CXSCREEN: c_int = 0;
 const SM_CYSCREEN: c_int = 1;
 const SWP_NOZORDER: u32 = 0x0004;
 const SWP_NOSIZE: u32 = 0x0001;
+const SWP_NOACTIVATE: u32 = 0x0010;
+const WM_DPICHANGED: u32 = 0x02E0;
+const WM_DPICHANGED_AFTERPARENT: u32 = 0x02E3;
+const USER_DEFAULT_SCREEN_DPI: u32 = 96;
 const GENERIC_READ: u32 = 0x80000000;
 const GENERIC_WRITE: u32 = 0x40000000;
 const FILE_SHARE_READ: u32 = 1;
@@ -128,6 +132,7 @@ const IDC_AUTOSTART: c_int = 104;
 const IDC_TOKEN: c_int = 105;
 const IDC_GENERATE: c_int = 106;
 const IDC_COPY_TOKEN: c_int = 107;
+const IDC_AUTHENABLE: c_int = 108;
 const IDC_SAVE: c_int = 1;
 const IDC_CANCEL: c_int = 2;
 const BN_CLICKED: u32 = 0;
@@ -137,6 +142,24 @@ const GMEM_MOVEABLE: u32 = 0x0002;
 const WHITE_BRUSH: c_int = 0;
 
 extern "advapi32" fn SystemFunction036(buf: [*]u8, len: u32) callconv(.winapi) u8;
+
+// ── DPI awareness ──────────────────────────────────────────────────
+// Per-Monitor V2 context value. Must match the Windows SDK definition.
+const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: ?*anyopaque = @ptrFromInt(@as(usize, @bitCast(@as(isize, -4))));
+
+extern "user32" fn SetThreadDpiAwarenessContext(value: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+extern "user32" fn GetDpiForSystem() callconv(.winapi) u32;
+extern "user32" fn GetDpiForWindow(hwnd: HWND) callconv(.winapi) u32;
+extern "user32" fn GetDlgItem(hDlg: HWND, nIDDlgItem: c_int) callconv(.winapi) HWND;
+
+fn setPerMonitorV2() bool {
+    return SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != null;
+}
+
+/// Scale a 96-DPI design unit by the current DPI.
+fn sd(design: c_int, dpi: u32) c_int {
+    return @intCast(@divTrunc(@as(i64, design) * dpi, USER_DEFAULT_SCREEN_DPI));
+}
 
 fn generateToken(buf: *[32]u8) void {
     var raw: [16]u8 = undefined;
@@ -154,6 +177,7 @@ pub const Config = struct {
     ip_len: usize = 0,
     port: u16 = 0,
     auto_start: bool = true,
+    auth_enabled: bool = true,
     auth_token: [64]u8 = undefined,
     auth_token_len: usize = 0,
 
@@ -166,7 +190,7 @@ pub const Config = struct {
     }
 
     pub fn hasAuth(self: *const Config) bool {
-        return self.auth_token_len > 0;
+        return self.auth_enabled and self.auth_token_len > 0;
     }
 };
 
@@ -236,6 +260,14 @@ pub fn load() Config {
         cfg.auto_start = val;
     }
 
+    // Parse "AuthEnabled":true/false. Legacy configs have no such field:
+    // keep the old behavior (auth on, token auto-generated).
+    var auth_enabled_found = false;
+    if (findJsonBool(json_data, "AuthEnabled")) |val| {
+        cfg.auth_enabled = val;
+        auth_enabled_found = true;
+    }
+
     // Parse "AuthToken":"<value>"
     if (findJsonString(json_data, "AuthToken")) |token_val| {
         if (token_val.len > 0 and token_val.len <= 64) {
@@ -243,12 +275,14 @@ pub fn load() Config {
             cfg.auth_token_len = token_val.len;
         }
     }
+    // New config file (no AuthEnabled field) with no token: keep legacy default = enabled.
+    if (!auth_enabled_found and cfg.auth_token_len == 0) cfg.auth_enabled = true;
 
     return ensureToken(&cfg);
 }
 
 fn ensureToken(cfg: *Config) Config {
-    if (cfg.auth_token_len == 0) {
+    if (cfg.auth_enabled and cfg.auth_token_len == 0) {
         var tok: [32]u8 = undefined;
         generateToken(&tok);
         @memcpy(cfg.auth_token[0..32], tok[0..32]);
@@ -349,6 +383,10 @@ pub fn save(cfg: *const Config) void {
     @memcpy(buf[pos .. pos + auto_str.len], auto_str);
     pos += auto_str.len;
 
+    const auth_str = if (cfg.auth_enabled) ",\"AuthEnabled\":true" else ",\"AuthEnabled\":false";
+    @memcpy(buf[pos .. pos + auth_str.len], auth_str);
+    pos += auth_str.len;
+
     if (cfg.auth_token_len > 0) {
         const tok_prefix = ",\"AuthToken\":\"";
         @memcpy(buf[pos .. pos + tok_prefix.len], tok_prefix);
@@ -393,6 +431,9 @@ var edit_port: HWND = null;
 var edit_token: HWND = null;
 var lbl_url: HWND = null;
 var chk_autostart: HWND = null;
+var chk_auth: HWND = null;
+var btn_generate: HWND = null;
+var btn_copy: HWND = null;
 var ui_font: HFONT = null;
 var ui_font_bold: HFONT = null;
 var ui_font_small: HFONT = null;
@@ -400,8 +441,10 @@ var class_registered: bool = false;
 var parent_hwnd: HWND = null;
 
 const DLG_W = 450;
-const DLG_H = 370;
+const DLG_H = 410;
 const CLASS_NAME = "MCPServerConfig\x00";
+
+var cur_dpi: u32 = 96;
 
 pub fn showDialog(parentHwnd: usize) void {
     parent_hwnd = @ptrFromInt(parentHwnd);
@@ -409,6 +452,12 @@ pub fn showDialog(parentHwnd: usize) void {
 }
 
 fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
+    // Opt this thread (and the dialog it creates) into per-monitor DPI scaling
+    // without changing the awareness of the host x64dbg process.
+    if (!setPerMonitorV2()) {
+        // Pre-Win10 Creators Update: fall back to system DPI.
+    }
+
     const hInst = GetModuleHandleA(null);
 
     if (!class_registered) {
@@ -423,9 +472,8 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
         class_registered = true;
     }
 
-    ui_font = CreateFontA(-14, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
-    ui_font_bold = CreateFontA(-14, 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
-    ui_font_small = CreateFontA(-12, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+    cur_dpi = GetDpiForSystem();
+    createFonts();
 
     dlg_hwnd = CreateWindowExA(
         WS_EX_DLGMODALFRAME,
@@ -434,8 +482,8 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         100,
         100,
-        DLG_W,
-        DLG_H,
+        sd(DLG_W, cur_dpi),
+        sd(DLG_H, cur_dpi),
         parent_hwnd,
         null,
         hInst,
@@ -450,7 +498,7 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
     // Center on screen
     const sw = GetSystemMetrics(SM_CXSCREEN);
     const sh = GetSystemMetrics(SM_CYSCREEN);
-    _ = SetWindowPos(dlg_hwnd, null, @divTrunc(sw - DLG_W, 2), @divTrunc(sh - DLG_H, 2), 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+    _ = SetWindowPos(dlg_hwnd, null, @divTrunc(sw - sd(DLG_W, cur_dpi), 2), @divTrunc(sh - sd(DLG_H, cur_dpi), 2), 0, 0, SWP_NOZORDER | SWP_NOSIZE);
 
     _ = ShowWindow(dlg_hwnd, 5);
     _ = UpdateWindow(dlg_hwnd);
@@ -470,6 +518,15 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
     return 0;
 }
 
+fn createFonts() void {
+    if (ui_font != null) _ = DeleteObject(ui_font);
+    if (ui_font_bold != null) _ = DeleteObject(ui_font_bold);
+    if (ui_font_small != null) _ = DeleteObject(ui_font_small);
+    ui_font = CreateFontA(-sd(14, cur_dpi), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+    ui_font_bold = CreateFontA(-sd(14, cur_dpi), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+    ui_font_small = CreateFontA(-sd(12, cur_dpi), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+}
+
 fn createCtrl(class: [*:0]const u8, text: ?[*:0]const u8, style: u32, x: c_int, y: c_int, w: c_int, h: c_int, id: c_int) HWND {
     const hInst = GetModuleHandleA(null);
     const hwnd = CreateWindowExA(
@@ -477,10 +534,10 @@ fn createCtrl(class: [*:0]const u8, text: ?[*:0]const u8, style: u32, x: c_int, 
         class,
         text,
         WS_CHILD | WS_VISIBLE | style,
-        x,
-        y,
-        w,
-        h,
+        sd(x, cur_dpi),
+        sd(y, cur_dpi),
+        sd(w, cur_dpi),
+        sd(h, cur_dpi),
         dlg_hwnd,
         @ptrFromInt(@as(usize, @intCast(id))),
         hInst,
@@ -497,6 +554,11 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
         WM_CREATE => {
             dlg_hwnd = hwnd;
             const cfg = load();
+
+            // Use the actual monitor DPI for the window we just created.
+            cur_dpi = GetDpiForWindow(hwnd);
+            if (cur_dpi == 0) cur_dpi = GetDpiForSystem();
+            createFonts();
 
             // Row 1: IP Address
             _ = createCtrl("STATIC\x00", "IP Address:\x00", 0, 20, 24, 85, 20, 0);
@@ -517,33 +579,37 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
             if (chk_autostart != null and cfg.auto_start)
                 _ = SendMessageA(chk_autostart, BM_SETCHECK, BST_CHECKED, 0);
 
-            // Row 4: Auth Token
-            _ = createCtrl("STATIC\x00", "Auth Token:\x00", 0, 20, 132, 85, 20, 0);
-            edit_token = createCtrl("EDIT\x00", null, WS_TABSTOP | ES_AUTOHSCROLL | ES_READONLY, 112, 128, 190, 24, IDC_TOKEN);
-            _ = createCtrl("BUTTON\x00", "Generate\x00", WS_TABSTOP, 310, 128, 65, 24, IDC_GENERATE);
-            _ = createCtrl("BUTTON\x00", "Copy\x00", WS_TABSTOP, 380, 128, 45, 24, IDC_COPY_TOKEN);
+            // Row 4: Require auth checkbox
+            chk_auth = createCtrl("BUTTON\x00", "Require Bearer token authentication\x00", WS_TABSTOP | BS_AUTOCHECKBOX, 20, 132, 280, 20, IDC_AUTHENABLE);
+            if (chk_auth != null and cfg.auth_enabled)
+                _ = SendMessageA(chk_auth, BM_SETCHECK, BST_CHECKED, 0);
 
-            const auth_hint = createCtrl("STATIC\x00", "Token is auto-generated on first run and persists across restarts.\x00", 0, 112, 155, 320, 16, 0);
+            // Row 5: Auth Token
+            _ = createCtrl("STATIC\x00", "Auth Token:\x00", 0, 20, 168, 85, 20, 0);
+            edit_token = createCtrl("EDIT\x00", null, WS_TABSTOP | ES_AUTOHSCROLL | ES_READONLY, 112, 164, 190, 24, IDC_TOKEN);
+            btn_generate = createCtrl("BUTTON\x00", "Generate\x00", WS_TABSTOP, 310, 164, 65, 24, IDC_GENERATE);
+            btn_copy = createCtrl("BUTTON\x00", "Copy\x00", WS_TABSTOP, 380, 164, 45, 24, IDC_COPY_TOKEN);
+
+            const auth_hint = createCtrl("STATIC\x00", "Token is auto-generated on first run and persists across restarts.\x00", 0, 112, 191, 320, 16, 0);
             if (auth_hint != null and ui_font_small != null)
                 _ = SendMessageA(auth_hint, WM_SETFONT, @intFromPtr(ui_font_small.?), 1);
 
-            // Row 5: URL preview
-            _ = createCtrl("STATIC\x00", "Server URL:\x00", 0, 20, 185, 85, 20, 0);
-            lbl_url = createCtrl("STATIC\x00", null, 0, 112, 185, 310, 20, IDC_URL);
+            // Row 6: URL preview
+            _ = createCtrl("STATIC\x00", "Server URL:\x00", 0, 20, 221, 85, 20, 0);
+            lbl_url = createCtrl("STATIC\x00", null, 0, 112, 221, 310, 20, IDC_URL);
             if (lbl_url != null and ui_font_bold != null)
                 _ = SendMessageA(lbl_url, WM_SETFONT, @intFromPtr(ui_font_bold.?), 1);
 
             // Help notes
             const notes = createCtrl("STATIC\x00",
                 "Use 0.0.0.0 to listen on all interfaces (for WSL/remote access).\r\nUse 127.0.0.1 for local-only access.\r\nSave will automatically restart the MCP server.\x00",
-                0, 20, 210, 400, 52, 0);
+                0, 20, 246, 400, 52, 0);
             if (notes != null and ui_font_small != null)
                 _ = SendMessageA(notes, WM_SETFONT, @intFromPtr(ui_font_small.?), 1);
 
             // Buttons
-            _ = createCtrl("BUTTON\x00", "Save\x00", WS_TABSTOP | BS_DEFPUSHBUTTON, 240, 280, 90, 30, IDC_SAVE);
-            _ = createCtrl("BUTTON\x00", "Cancel\x00", WS_TABSTOP, 340, 280, 90, 30, IDC_CANCEL);
-
+            _ = createCtrl("BUTTON\x00", "Save\x00", WS_TABSTOP | BS_DEFPUSHBUTTON, 240, 316, 90, 30, IDC_SAVE);
+            _ = createCtrl("BUTTON\x00", "Cancel\x00", WS_TABSTOP, 340, 316, 90, 30, IDC_CANCEL);
             // Set initial values
             if (edit_ip != null) {
                 var ip_z: [65]u8 = undefined;
@@ -564,6 +630,7 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
                 _ = SendMessageA(edit_token, WM_SETTEXT, 0, @bitCast(@intFromPtr(&tok_z)));
             }
             updateUrlPreview();
+            updateAuthControls();
 
             if (edit_ip != null) _ = SetFocus(edit_ip);
             return 0;
@@ -615,6 +682,10 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
                 }
                 return 0;
             }
+            if (id == IDC_AUTHENABLE and notify == BN_CLICKED) {
+                updateAuthControls();
+                return 0;
+            }
             // Update URL preview on text change (EN_CHANGE = 0x0300)
             if (notify == 0x0300 and (id == IDC_IP or id == IDC_PORT)) {
                 updateUrlPreview();
@@ -629,6 +700,25 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
                 return @bitCast(@intFromPtr(GetStockObject(WHITE_BRUSH)));
             }
             return DefWindowProcA(hwnd, msg, wParam, lParam);
+        },
+        WM_DPICHANGED => {
+            // wParam HIWORD = new DPI; lParam = suggested window rect.
+            const new_dpi: u32 = @intCast(@as(u32, @truncate(@as(usize, @bitCast(lParam)) >> 16)) & 0xFFFF);
+            if (new_dpi == 0 or new_dpi == cur_dpi) return 0;
+            cur_dpi = new_dpi;
+            const rect: *const RECT = @ptrCast(@alignCast(@as([*]const u8, @ptrFromInt(@as(usize, @bitCast(lParam))))[0..@sizeOf(RECT)].ptr));
+            _ = SetWindowPos(
+                hwnd,
+                null,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            createFonts();
+            relayoutChildren();
+            return 0;
         },
         WM_CLOSE => {
             restoreParent();
@@ -648,6 +738,35 @@ fn restoreParent() void {
     if (parent_hwnd != null) {
         _ = EnableWindow(parent_hwnd, 1);
         _ = SetForegroundWindow(parent_hwnd);
+    }
+}
+
+/// Reposition every child control (design coordinates, 96-DPI base) after a DPI change.
+fn moveCtrl(h: HWND, x: c_int, y: c_int, w: c_int, hgt: c_int) void {
+    if (h == null) return;
+    _ = SetWindowPos(h, null, sd(x, cur_dpi), sd(y, cur_dpi), sd(w, cur_dpi), sd(hgt, cur_dpi), SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+fn relayoutChildren() void {
+    // Row 1: IP Address
+    moveCtrl(edit_ip, 112, 20, 190, 24);
+    // Row 2: Port
+    moveCtrl(edit_port, 112, 56, 100, 24);
+    // Row 3-4: checkboxes
+    moveCtrl(chk_autostart, 20, 96, 250, 20);
+    moveCtrl(chk_auth, 20, 132, 280, 20);
+    // Row 5: Auth Token
+    moveCtrl(edit_token, 112, 164, 190, 24);
+    moveCtrl(btn_generate, 310, 164, 65, 24);
+    moveCtrl(btn_copy, 380, 164, 45, 24);
+    // Row 6: URL preview
+    moveCtrl(lbl_url, 112, 221, 310, 20);
+    // Buttons (moved via enum by walking children is overkill; move by known ids)
+    if (dlg_hwnd != null) {
+        var h: HWND = GetDlgItem(dlg_hwnd, IDC_SAVE);
+        moveCtrl(h, 240, 316, 90, 30);
+        h = GetDlgItem(dlg_hwnd, IDC_CANCEL);
+        moveCtrl(h, 340, 316, 90, 30);
     }
 }
 
@@ -691,6 +810,13 @@ fn updateUrlPreview() void {
     _ = SendMessageA(lbl_url, WM_SETTEXT, 0, @bitCast(@intFromPtr(&url)));
 }
 
+fn updateAuthControls() void {
+    const enabled: BOOL = if (chk_auth != null and SendMessageA(chk_auth, BM_GETCHECK, 0, 0) == BST_CHECKED) 1 else 0;
+    if (edit_token != null) _ = EnableWindow(edit_token, enabled);
+    if (btn_generate != null) _ = EnableWindow(btn_generate, enabled);
+    if (btn_copy != null) _ = EnableWindow(btn_copy, enabled);
+}
+
 fn onSave(hwnd: HWND) void {
     var ip_buf: [64]u8 = undefined;
     const ip_len: usize = @intCast(GetWindowTextA(edit_ip, &ip_buf, 64));
@@ -712,13 +838,27 @@ fn onSave(hwnd: HWND) void {
     else
         true;
 
+    const auth_enabled = if (chk_auth != null)
+        SendMessageA(chk_auth, BM_GETCHECK, 0, 0) == BST_CHECKED
+    else
+        true;
+
     var tok_buf: [64]u8 = undefined;
-    const tok_len: usize = if (edit_token != null)
+    var tok_len: usize = if (edit_token != null)
         @intCast(GetWindowTextA(edit_token, &tok_buf, 64))
     else
         0;
 
-    var cfg = Config{ .port = port, .auto_start = auto_start };
+    if (auth_enabled and tok_len == 0) {
+        // Never save an enabled-but-empty token (would lock out all clients).
+        var tok: [32]u8 = undefined;
+        generateToken(&tok);
+        @memcpy(tok_buf[0..32], tok[0..32]);
+        tok_len = 32;
+    }
+    if (!auth_enabled) tok_len = 0;
+
+    var cfg = Config{ .port = port, .auto_start = auto_start, .auth_enabled = auth_enabled };
     @memcpy(cfg.ip[0..ip_len], ip_buf[0..ip_len]);
     cfg.ip_len = ip_len;
     if (tok_len > 0) {
@@ -728,7 +868,7 @@ fn onSave(hwnd: HWND) void {
     save(&cfg);
 
     mcp.stop();
-    mcp.setConfig(cfg.ip[0..cfg.ip_len], cfg.port, cfg.tokenSlice());
+    mcp.setConfig(cfg.ip[0..cfg.ip_len], cfg.port, cfg.tokenSlice(), cfg.auth_enabled);
     if (cfg.auto_start) mcp.start();
 
     bridge.logPuts("[x64dbg-MCP Server] Configuration saved.\x00");
