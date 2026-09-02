@@ -134,7 +134,7 @@ export fn plugsetup(setupStruct: *bridge.PLUG_SETUPSTRUCT) callconv(.c) void {
 
     // Load saved config or use defaults
     const cfg = config.load();
-    mcp.setConfig(cfg.ip[0..cfg.ip_len], cfg.port, cfg.tokenSlice(), cfg.auth_enabled);
+    mcp.setConfig(cfg.ip[0..cfg.ip_len], cfg.port, cfg.tokenSlice());
 
     // Log plugin handle
     logPluginHandle();
