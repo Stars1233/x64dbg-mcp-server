@@ -113,6 +113,9 @@ const SM_CXSCREEN: c_int = 0;
 const SM_CYSCREEN: c_int = 1;
 const SWP_NOZORDER: u32 = 0x0004;
 const SWP_NOSIZE: u32 = 0x0001;
+const SWP_NOACTIVATE: u32 = 0x0010;
+const WM_DPICHANGED: u32 = 0x02E0;
+const USER_DEFAULT_SCREEN_DPI: u32 = 96;
 const GENERIC_READ: u32 = 0x80000000;
 const GENERIC_WRITE: u32 = 0x40000000;
 const FILE_SHARE_READ: u32 = 1;
@@ -137,6 +140,24 @@ const GMEM_MOVEABLE: u32 = 0x0002;
 const WHITE_BRUSH: c_int = 0;
 
 extern "advapi32" fn SystemFunction036(buf: [*]u8, len: u32) callconv(.winapi) u8;
+
+// ── DPI awareness ──────────────────────────────────────────────────
+// Per-Monitor V2 context value. Must match the Windows SDK definition.
+const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: ?*anyopaque = @ptrFromInt(@as(usize, @bitCast(@as(isize, -4))));
+
+extern "user32" fn SetThreadDpiAwarenessContext(value: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+extern "user32" fn GetDpiForSystem() callconv(.winapi) u32;
+extern "user32" fn GetDpiForWindow(hwnd: HWND) callconv(.winapi) u32;
+extern "user32" fn GetDlgItem(hDlg: HWND, nIDDlgItem: c_int) callconv(.winapi) HWND;
+
+fn setPerMonitorV2() bool {
+    return SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != null;
+}
+
+/// Scale a 96-DPI design unit by the current DPI.
+fn sd(design: c_int, dpi: u32) c_int {
+    return @intCast(@divTrunc(@as(i64, design) * dpi, USER_DEFAULT_SCREEN_DPI));
+}
 
 fn generateToken(buf: *[32]u8) void {
     var raw: [16]u8 = undefined;
@@ -403,12 +424,20 @@ const DLG_W = 450;
 const DLG_H = 370;
 const CLASS_NAME = "MCPServerConfig\x00";
 
+var cur_dpi: u32 = 96;
+
 pub fn showDialog(parentHwnd: usize) void {
     parent_hwnd = @ptrFromInt(parentHwnd);
     _ = CreateThread(null, 0, dialogThread, null, 0, null);
 }
 
 fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
+    // Opt this thread (and the dialog it creates) into per-monitor DPI scaling
+    // without changing the awareness of the host x64dbg process.
+    if (!setPerMonitorV2()) {
+        // Pre-Win10 Creators Update: fall back to system DPI.
+    }
+
     const hInst = GetModuleHandleA(null);
 
     if (!class_registered) {
@@ -423,9 +452,8 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
         class_registered = true;
     }
 
-    ui_font = CreateFontA(-14, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
-    ui_font_bold = CreateFontA(-14, 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
-    ui_font_small = CreateFontA(-12, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+    cur_dpi = GetDpiForSystem();
+    createFonts();
 
     dlg_hwnd = CreateWindowExA(
         WS_EX_DLGMODALFRAME,
@@ -434,8 +462,8 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         100,
         100,
-        DLG_W,
-        DLG_H,
+        sd(DLG_W, cur_dpi),
+        sd(DLG_H, cur_dpi),
         parent_hwnd,
         null,
         hInst,
@@ -450,7 +478,7 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
     // Center on screen
     const sw = GetSystemMetrics(SM_CXSCREEN);
     const sh = GetSystemMetrics(SM_CYSCREEN);
-    _ = SetWindowPos(dlg_hwnd, null, @divTrunc(sw - DLG_W, 2), @divTrunc(sh - DLG_H, 2), 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+    _ = SetWindowPos(dlg_hwnd, null, @divTrunc(sw - sd(DLG_W, cur_dpi), 2), @divTrunc(sh - sd(DLG_H, cur_dpi), 2), 0, 0, SWP_NOZORDER | SWP_NOSIZE);
 
     _ = ShowWindow(dlg_hwnd, 5);
     _ = UpdateWindow(dlg_hwnd);
@@ -470,6 +498,15 @@ fn dialogThread(_: ?*anyopaque) callconv(.winapi) u32 {
     return 0;
 }
 
+fn createFonts() void {
+    if (ui_font != null) _ = DeleteObject(ui_font);
+    if (ui_font_bold != null) _ = DeleteObject(ui_font_bold);
+    if (ui_font_small != null) _ = DeleteObject(ui_font_small);
+    ui_font = CreateFontA(-sd(14, cur_dpi), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+    ui_font_bold = CreateFontA(-sd(14, cur_dpi), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+    ui_font_small = CreateFontA(-sd(12, cur_dpi), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "Segoe UI\x00");
+}
+
 fn createCtrl(class: [*:0]const u8, text: ?[*:0]const u8, style: u32, x: c_int, y: c_int, w: c_int, h: c_int, id: c_int) HWND {
     const hInst = GetModuleHandleA(null);
     const hwnd = CreateWindowExA(
@@ -477,10 +514,10 @@ fn createCtrl(class: [*:0]const u8, text: ?[*:0]const u8, style: u32, x: c_int, 
         class,
         text,
         WS_CHILD | WS_VISIBLE | style,
-        x,
-        y,
-        w,
-        h,
+        sd(x, cur_dpi),
+        sd(y, cur_dpi),
+        sd(w, cur_dpi),
+        sd(h, cur_dpi),
         dlg_hwnd,
         @ptrFromInt(@as(usize, @intCast(id))),
         hInst,
@@ -497,6 +534,11 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
         WM_CREATE => {
             dlg_hwnd = hwnd;
             const cfg = load();
+
+            // Use the actual monitor DPI for the window we just created.
+            cur_dpi = GetDpiForWindow(hwnd);
+            if (cur_dpi == 0) cur_dpi = GetDpiForSystem();
+            createFonts();
 
             // Row 1: IP Address
             _ = createCtrl("STATIC\x00", "IP Address:\x00", 0, 20, 24, 85, 20, 0);
@@ -543,7 +585,6 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
             // Buttons
             _ = createCtrl("BUTTON\x00", "Save\x00", WS_TABSTOP | BS_DEFPUSHBUTTON, 240, 280, 90, 30, IDC_SAVE);
             _ = createCtrl("BUTTON\x00", "Cancel\x00", WS_TABSTOP, 340, 280, 90, 30, IDC_CANCEL);
-
             // Set initial values
             if (edit_ip != null) {
                 var ip_z: [65]u8 = undefined;
@@ -630,6 +671,24 @@ fn wndProc(hwnd: HWND, msg: u32, wParam: WPARAM, lParam: LPARAM) callconv(.winap
             }
             return DefWindowProcA(hwnd, msg, wParam, lParam);
         },
+        WM_DPICHANGED => {
+            const new_dpi: u32 = @intCast(wParam & 0xFFFF);
+            if (new_dpi == 0 or new_dpi == cur_dpi) return 0;
+            cur_dpi = new_dpi;
+            const rect: *const RECT = @ptrCast(@alignCast(@as([*]const u8, @ptrFromInt(@as(usize, @bitCast(lParam))))[0..@sizeOf(RECT)].ptr));
+            _ = SetWindowPos(
+                hwnd,
+                null,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            createFonts();
+            relayoutChildren();
+            return 0;
+        },
         WM_CLOSE => {
             restoreParent();
             _ = DestroyWindow(hwnd);
@@ -648,6 +707,30 @@ fn restoreParent() void {
     if (parent_hwnd != null) {
         _ = EnableWindow(parent_hwnd, 1);
         _ = SetForegroundWindow(parent_hwnd);
+    }
+}
+
+/// Reposition every child control (design coordinates, 96-DPI base) after a DPI change.
+fn moveCtrl(h: HWND, x: c_int, y: c_int, w: c_int, hgt: c_int) void {
+    if (h == null) return;
+    _ = SetWindowPos(h, null, sd(x, cur_dpi), sd(y, cur_dpi), sd(w, cur_dpi), sd(hgt, cur_dpi), SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+fn relayoutChildren() void {
+    moveCtrl(edit_ip, 112, 20, 190, 24);
+    moveCtrl(edit_port, 112, 56, 100, 24);
+    moveCtrl(chk_autostart, 20, 96, 250, 20);
+    moveCtrl(edit_token, 112, 128, 190, 24);
+    moveCtrl(lbl_url, 112, 185, 310, 20);
+    if (dlg_hwnd != null) {
+        var h: HWND = GetDlgItem(dlg_hwnd, IDC_SAVE);
+        moveCtrl(h, 240, 280, 90, 30);
+        h = GetDlgItem(dlg_hwnd, IDC_CANCEL);
+        moveCtrl(h, 340, 280, 90, 30);
+        h = GetDlgItem(dlg_hwnd, IDC_GENERATE);
+        moveCtrl(h, 310, 128, 65, 24);
+        h = GetDlgItem(dlg_hwnd, IDC_COPY_TOKEN);
+        moveCtrl(h, 380, 128, 45, 24);
     }
 }
 
