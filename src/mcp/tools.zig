@@ -1433,10 +1433,56 @@ fn stopDebug(_: ?std.json.Value, out: []u8) ToolResult {
 
 // ── RestartDebug ────────────────────────────────────────────────────
 fn restartDebug(_: ?std.json.Value, out: []u8) ToolResult {
-    if (!bridge.isDebugging()) return errResult(out, "Error: No active debug session.");
-    _ = bridge.cmdExec("restart");
-    Sleep(1000);
-    return result(out, if (bridge.isDebugging()) "Debug session restarted." else "Restart command sent.");
+    if (!bridge.isDebugging())
+        return errResult(out, "Error: No active debug session.");
+
+    const path = main.getCurrentDebuggeePath();
+    if (path.len == 0)
+        return errResult(out, "Error: Current debuggee path is unknown.");
+
+    const old_pid = bridge.valFromString("$pid");
+
+    var cmd_buf: [1024]u8 = undefined;
+    const cmd = std.fmt.bufPrint(
+        &cmd_buf,
+        "init \"{s}\"\x00",
+        .{path},
+    ) catch return errResult(out, "Error: debuggee path too long.");
+
+    if (!bridge.cmdExec(@ptrCast(cmd.ptr)))
+        return errResult(out, "Error: Failed to submit restart command.");
+
+    // A successful restart must result in a different process ID.
+    // Allow up to 5 seconds for the old debuggee to terminate and the
+    // replacement process to reach its initial debug break.
+    var waited: u32 = 0;
+    while (waited < 5000) : (waited += 100) {
+        Sleep(100);
+
+        if (bridge.isDebugging()) {
+            const new_pid = bridge.valFromString("$pid");
+            if (new_pid != 0 and new_pid != old_pid) {
+                return fmtResult(
+                    out,
+                    "Debug session restarted successfully. PID {d} -> {d}.",
+                    .{ old_pid, new_pid },
+                );
+            }
+        }
+    }
+
+    if (!bridge.isDebugging())
+        return errResult(
+            out,
+            "Error: Restart command was submitted, but no new debug session became active.",
+        );
+
+    const current_pid = bridge.valFromString("$pid");
+    return fmtErr(
+        out,
+        "Error: Restart command was submitted, but PID did not change (still {d}).",
+        .{current_pid},
+    );
 }
 
 // ── SetBreakpoint ───────────────────────────────────────────────────
