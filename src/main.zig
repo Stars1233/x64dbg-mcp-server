@@ -51,6 +51,26 @@ pub fn clearEvents() void {
     event_log_head = 0;
 }
 
+// ── Current debuggee path ───────────────────────────────────────────
+//
+// x64dbg supplies the full executable path in CB_INITDEBUG.  Keep a
+// private copy so RestartDebug can issue the same "init <path>"
+// operation as x64dbg's normal restart behaviour.
+const DEBUGGEE_PATH_SIZE = 1024;
+var current_debuggee_path: [DEBUGGEE_PATH_SIZE]u8 = undefined;
+var current_debuggee_path_len: usize = 0;
+
+pub fn setCurrentDebuggeePath(path: []const u8) void {
+    const len = @min(path.len, DEBUGGEE_PATH_SIZE - 1);
+    @memcpy(current_debuggee_path[0..len], path[0..len]);
+    current_debuggee_path[len] = 0;
+    current_debuggee_path_len = len;
+}
+
+pub fn getCurrentDebuggeePath() []const u8 {
+    return current_debuggee_path[0..current_debuggee_path_len];
+}
+
 const HWND = ?*anyopaque;
 extern "user32" fn MessageBoxA(hWnd: HWND, lpText: [*:0]const u8, lpCaption: [*:0]const u8, uType: u32) callconv(.winapi) i32;
 
@@ -344,7 +364,11 @@ fn logAndPush(msg: []const u8) void {
     pushEvent(msg[0 .. msg.len - 1]); // strip null terminator for event log
 }
 
-fn cbInitDebug(_: bridge.CBTYPE, _: *anyopaque) callconv(.c) void {
+fn cbInitDebug(_: bridge.CBTYPE, info: *anyopaque) callconv(.c) void {
+    const cb: *bridge.PLUG_CB_INITDEBUG = @ptrCast(@alignCast(info));
+    const path = std.mem.span(cb.szFileName);
+    setCurrentDebuggeePath(path);
+
     logAndPush("[x64dbg-MCP Server] Debug session started.\x00");
     mcp.notifyEvent("info", "Debug session started. Binary loaded.");
 }
